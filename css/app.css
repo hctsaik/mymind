@@ -820,6 +820,8 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
  .mstat.warn{background:var(--warn-bg);color:var(--warn-text);border:1.5px solid #B45309}
  /* toasts move above the sheet's footer while a dialog is open, so they never cover choices */
  body:has(#layer .dlg) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))}
+ /* r3: also while a side panel (history, style, note) is open, so the toast never covers its list */
+ body:has(#panelHost:not(:empty)) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))}
 }
 /* v1.3.2 hotfix: floating bar over the selected node on phones (✏️ 編輯 opens the keyboard) */
 .nodetb{display:none}
