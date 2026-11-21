@@ -77,7 +77,7 @@ function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main')
     else drawAll(); }
   drawDialog(); }
 const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
-function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S);
+function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S); const mb=$('.top .rb.more'); if(mb&&!mb.matches('[aria-expanded=true]')) mb.outerHTML=V.moreBtn(S); $$('.mstat').forEach(x=>x.remove()); $('.top.flt')?.insertAdjacentHTML('afterend',V.mobileStatus(S));
   const bp=$('.backpill'); if(bp){bp.querySelector('.cn').textContent=curName(); bp.setAttribute('aria-label','回到列表（目前節點：'+curName()+'）');}
   $('#cv').style.setProperty('--cv',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas);
   const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
@@ -567,7 +567,8 @@ async function act(a,v,el){ const f=selInfo();
     try{ await GD.signIn({hint:(D.drive&&D.drive.email)||prefs.get().driveEmail||''}); driveC=null; const c=dc(); const u=await c.about(); await c.ensureFolder(); D.drive={email:u.email,name:u.name}; D.driveAuth=false; D.form.backend='drive'; if(D.form.sync==='local'&&!D.syncTouched) D.form.sync='manual';
       if(prefs.get().driveEmail===u.email&&isDrive()){ syncInfo(); render(); } toast(`已連結 ${u.email}`); }
     catch(e){ D.driveErr=e.message; } D.driveBusy=false; if(S.dialog===D){ drawDialog(); $('[data-act="driveDisconnect"],[data-act="driveConnect"]')?.focus(); } break; }
-  case 'driveDisconnect': { const D=S.dialog; GD.revoke(); driveC=null; const wasDrive=isDrive(); prefs.set({driveEmail:'',driveName:'',...(wasDrive?{sync:'local'}:{})}); if(D){ D.drive=null; D.driveAuth=false; if(D.form.backend==='drive') D.form.sync='local'; drawDialog(); } syncInfo(); render(); toast('已中斷和 Google 雲端硬碟的連結；圖仍存在這個瀏覽器，雲端上的檔案也還在'); break; }
+  case 'driveDisconnectNo': { const D=S.dialog; if(D){ D.confirmDisc=false; drawDialog(); $('#layer [data-act="driveDisconnect"]')?.focus(); } break; }
+  case 'driveDisconnect': { const D=S.dialog; if(D&&v!=='yes'){ D.confirmDisc=true; drawDialog(); $('#layer [data-act="driveDisconnect"][data-v="yes"]')?.focus(); break; } if(D) D.confirmDisc=false; GD.revoke(); driveC=null; const wasDrive=isDrive(); prefs.set({driveEmail:'',driveName:'',...(wasDrive?{sync:'local'}:{})}); if(D){ D.drive=null; D.driveAuth=false; if(D.form.backend==='drive') D.form.sync='local'; drawDialog(); } syncInfo(); render(); toast('已中斷和 Google 雲端硬碟的連結；圖仍存在這個瀏覽器，雲端上的檔案也還在'); break; }
   case 'welcomeGithub': openSettings('gh',{fromWelcome:true}); break;
   case 'welcomeLocal': prefs.set({mode:'local',sync:'local'}); S.mode='local'; S.syncMode='local'; askPersist(); location.hash='#/'; route(); break;
   case 'closeDialog': closeDialog(); break;

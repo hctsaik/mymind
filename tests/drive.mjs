@@ -63,6 +63,8 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':'';
   await click(p,'[data-act="syncNow"]'); await settle(p); await W(300);
   ok(T+'conflict: changed on both sides → conflict dialog (Drive version check)',await p.locator('.dlg,.modal').filter({hasText:'雲端'}).count()>=1&&(await state(p)).st==='error');
   await shot(p,`10-drive-conflict-${mobile?'mobile':'desktop'}`);
+  { const g=await p.evaluate(()=>{ const r=[...document.querySelectorAll('.dlg .radio')].at(-1), f=document.querySelector('.dlg .mfoot'), sp=r&&r.querySelector('span:last-child, small, p'); const rb=r.getBoundingClientRect(), fb=f.getBoundingClientRect(); return {last:rb.bottom,foot:fb.top,txt:r.textContent}; });
+    ok(T+'conflict: 3rd choice and its 副本 explanation fully visible above the footer (review r2 MUST)',g.last<=g.foot+0.5&&/副本/.test(g.txt),JSON.stringify(g)); }
   await click(p,'[data-act="cfPick"][data-v="merge"]'); await click(p,'[data-act="cfApply"]'); await settle(p);
   const ad=D.doc('mapA'); ok(T+'conflict: merge keeps both edits and uploads',ad&&JSON.stringify(ad).includes('行程（雲端）')&&JSON.stringify(ad).includes('美食（本機）'),JSON.stringify(ad&&ad.root.c));
   // ---------- 4. auto mode batching ----------
@@ -87,8 +89,10 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':'';
   D.expireAll(); const calls0=await p.evaluate(()=>window.__gis.calls);
   await edit(p,'mapA',"d.root.t='過期後修改'"); await W(2200); await settle(p);
   s=await state(p); ok(T+'expired token: shows 「重新連結」, edits stay local',s.auth&&s.un>=1&&await p.locator('.syncbtn.reauth').count()>=1,JSON.stringify(s));
+  if(mobile){ ok(T+'phone: reconnect shown as text strip + ! badge on ⋯ (not icon only)',await p.locator('.mstat.warn').isVisible()&&/重新連結 Google/.test(await p.locator('.mstat.warn').textContent())&&await p.locator('.rb.more .nbadge.warn').isVisible());
+    const tw=await p.evaluate(()=>{ const b=document.querySelector('.backpill'); return b?b.getBoundingClientRect().width:0; }); ok(T+'phone: title pill keeps a readable width (≥ 112px)',tw>=112,String(tw)); }
   await shot(p,`10-drive-reconnect-${mobile?'mobile':'desktop'}`);
-  await click(p,'.syncbtn.reauth'); await W(500); await settle(p);
+  await click(p,mobile?'.mstat.warn':'.syncbtn.reauth'); await W(500); await settle(p);
   const lg=await p.evaluate(()=>window.__gis.log.at(-1));
   ok(T+'reconnect: one click, no consent prompt, account hinted',(await p.evaluate(()=>window.__gis.calls))===calls0+1&&lg.prompt===''&&lg.hint==='hanzhang.test@gmail.com',JSON.stringify(lg));
   ok(T+'reconnect: queued edit uploaded',D.doc('mapA').root.t==='過期後修改');
@@ -97,10 +101,14 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':'';
   s=await state(p); ok(T+'after reload: needs a click to reconnect (token was in memory only)',s.auth===true,JSON.stringify(s));
   ok(T+'no Google network calls without a token',await p.evaluate(()=>!document.querySelector('script[src*="accounts.google.com"]')));
   // ---------- 8. history from Drive revisions ----------
-  if(!mobile){ await click(p,'[data-act="syncNow"]'); await settle(p); await p.evaluate(()=>{ location.hash='#/map/mapA'; }); await W(400); await click(p,'[data-act="history"]'); await W(900);
-    ok(T+'history panel lists Drive revisions',await p.locator('.hist li').count()>=2); await shot(p,'10-drive-history-desktop'); await click(p,'[data-act="closePanel"]'); await W(200); }
+  { await click(p,'[data-act="syncNow"]'); await settle(p); await p.evaluate(()=>{ location.hash='#/map/mapA'; }); await W(400); await click(p,'[data-act="history"]'); await W(900);
+    const ht=await p.locator('.hist').textContent().catch(()=>'');
+    ok(T+'history panel lists Drive revisions with version number + clock time',await p.locator('.hist li').count()>=2&&/第 \d+ 版/.test(ht)&&/\d+\/\d+ \d\d:\d\d/.test(ht),ht.slice(0,120)); await shot(p,`10-drive-history-${mobile?'mobile':'desktop'}`); await click(p,'[data-act="closePanel"]'); await W(200); }
   // ---------- 9. disconnect ----------
   await click(p,'[data-act="settings"]'); await W(300); await click(p,'[data-act="driveDisconnect"]'); await W(300);
+  ok(T+'disconnect asks first (nothing revoked yet)',/再授權/.test(await p.locator('.gdconfirm').textContent())&&await p.evaluate(()=>!!JSON.parse(localStorage.getItem('mymind.prefs')).driveEmail));
+  await shot(p,`10-drive-disconnect-confirm-${mobile?'mobile':'desktop'}`);
+  await click(p,'[data-act="driveDisconnect"][data-v="yes"]'); await W(300);
   ok(T+'disconnect: '+(mobile?'':'token revoked, ')+'back to 只存瀏覽器, maps still here',(mobile||await p.evaluate(()=>!!(window.__gis&&window.__gis.revoked)))&&await p.evaluate(()=>JSON.parse(localStorage.getItem('mymind.prefs')).sync)==='local'&&await p.evaluate(()=>window.__mmStore.maps.index().length)===3);
   ok(T+'no page errors (incl. CSP)',!p.errs.length,p.errs.join(' | '));
   await p.ctx.close(); }
