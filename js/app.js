@@ -7,6 +7,7 @@ import { merge3, diffSummary } from './merge.js';
 import * as AI from './ai.js';
 import * as IO from './io.js';
 import * as V from './views.js';
+import { VERSION } from './version.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const P0=prefs.get();
 const S={view:'list',filter:'all',q:'',sideQ:'',sort:'updated',mapId:null,doc:null,sel:null,panel:'',tab:'theme',outline:false,
@@ -57,9 +58,9 @@ function route(){ const h=location.hash.replace(/^#\/?/,''); const [a,b]=h.split
   if(!S.mode){ S.view='welcome'; return render(); }
   if(a==='map'&&b){ const d=maps.load(b); if(!d){ toast('找不到這張圖'); location.hash='#/'; return; } openDoc(d); return; }
   S.view='list'; S.filter=['starred','recent','trash'].includes(a)?a:'all'; closeDoc(); render(); }
-function openDoc(d){ if(S.mapId!==d.id){ S.undo=[];S.redo=[];S.preview=null;S.vp=null;S.panel=S.panel==='history'?'':S.panel; S.sel=d.root.id; S.outline=false; }
+function openDoc(d){ if(S.mapId!==d.id){ S.undo=[];S.redo=[];S.preview=null;S.vp=null;S.panel=S.panel==='history'?'':S.panel; S.sel=d.root.id; S.outline=false; S.find=null; }
   S.view='editor'; S.mapId=d.id; S.doc=d; maps.setMeta(d.id,{opened:new Date().toISOString()}); const m=maps.meta(d.id); if(S.sync.state!=='error'&&S.sync.state!=='offline') S.sync.state=m&&m.dirty&&remote()?'dirty':'saved'; render(); }
-function closeDoc(){ S.doc=null; S.mapId=null; S.editing=null; }
+function closeDoc(){ S.find=null; S.doc=null; S.mapId=null; S.editing=null; }
 // ---------- rendering ----------
 let shellKey='';
 function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main'); const app=$('#app');
@@ -101,7 +102,8 @@ let lay=null;
 function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const doc=S.preview?S.preview.doc:S.doc;
   if(!S.vp||first&&!S.vp) S.vp=initialView(lay.r); if(first&&S.vpFor!==S.mapId){S.vp=initialView(lay.r);S.vpFor=S.mapId;}
   const lod=S.vp.sc<.45&&all(lay.r).length>60;
-  const {svg,b}=renderMap(lay.r,th(),{sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod});
+  if(S.find){ S.find.hits=findHits(); if(S.find.i>=S.find.hits.length) S.find.i=0; }
+  const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod});
   vp.innerHTML=svg; S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
   $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
 function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; positionEditor(); updateMinimapVp(); }
@@ -119,6 +121,18 @@ function zoomAt(f,cx,cy){ const st=$('#stage'); if(cx===undefined){cx=st.clientW
 function fit(){ const r=lay.r, st=$('#stage'), b=bounds(r), PAD=isM()?16:28; const sc=Math.max(.15,Math.min(1.2,(st.clientWidth-2*PAD)/b.w,(st.clientHeight-2*PAD)/b.h)); S.vp={sc,tx:st.clientWidth/2-(b.x0+b.w/2)*sc,ty:st.clientHeight/2-(b.y0+b.h/2)*sc}; drawMap(); }
 function ensureVisible(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) return; const {tx,ty,sc}=S.vp, x0=tx+(n.x-n.w/2)*sc, x1=tx+(n.x+n.w/2+40)*sc, y0=ty+(n.y-n.h/2)*sc, y1=ty+(n.y+n.h/2)*sc, W=st.clientWidth, H=st.clientHeight, M=24; let dx=0,dy=0;
   if(x1>W-M) dx=W-M-x1; if(x0+dx<M) dx=M-x0; if(y1>H-M) dy=H-M-y1; if(y0+dy<M) dy=M-y0; if(dx||dy){S.vp={...S.vp,tx:tx+dx,ty:ty+dy}; applyVp();} }
+// ---------- node search (v1.3) ----------
+const norm=t=>String(t||'').normalize('NFKC').toLowerCase();
+function findHits(){ const F=S.find, q=F&&norm(F.q.trim()); if(!q) return []; const doc=S.preview?S.preview.doc:S.doc; return allDeep(doc.root).filter(n=>norm(n.t).includes(q)||norm(n.note).includes(q)).map(n=>n.id); }
+function openFind(){ if(S.view!=='editor'||!S.doc) return; if(S.editing) commitEdit(); closeMenu();
+  if(!S.find){ S.find={q:'',i:0,hits:[]}; const cv=$('#cv'); if(cv&&!$('#findbar')) $('#outlineHost').insertAdjacentHTML('beforebegin',V.findbar(S)); $$('[data-act="find"]').forEach(b=>b.setAttribute('aria-pressed','true')); }
+  const q=$('#findq'); if(q){ q.focus(); q.select(); } }
+function closeFind(){ if(!S.find) return; S.find=null; $('#findbar')?.remove(); $$('[data-act="find"]').forEach(b=>b.setAttribute('aria-pressed','false')); drawMap(); $('#cv')?.focus({preventScroll:true}); }
+function updateFindCount(){ const c=$('#findcount'); if(c) c.textContent=V.findCount(S.find); }
+function centerOn(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) return; const sc=S.vp.sc, top=isM()?70:56; S.vp={sc,tx:st.clientWidth/2-n.x*sc,ty:top+(st.clientHeight-top)/2-n.y*sc}; drawMap(); }
+function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits.length){ updateFindCount(); drawMap(); return; } F.i=((i%F.hits.length)+F.hits.length)%F.hits.length; const id=F.hits[F.i];
+  if(!S.preview){ let p=find(S.doc.root,id), opened=false; while(p&&p.parent){ if(p.parent.collapsed){ delete p.parent.collapsed; opened=true; } p=find(S.doc.root,p.parent.id); } if(opened) touch(); S.sel=id; }
+  drawAll(); centerOn(id); updateFindCount(); }
 function select(id,{scroll=true}={}){ S.sel=id; drawAll(); if(scroll) ensureVisible(id); }
 // ---------- inline edit ----------
 function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
@@ -192,6 +206,9 @@ document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.m
   if(S.dialog){ if(e.key==='Escape'){ e.preventDefault(); closeDialog(); } else if(e.key==='Tab') trapFocus(e); return; }
   if(c&&e.key.toLowerCase()==='s'){ e.preventDefault(); if(remote()) pushNow(); else toast('已存在這個瀏覽器'+(secrets.pat()?'（目前設定：只存瀏覽器）':'')); return; }
   if(e.altKey&&e.key==='0'){ e.preventDefault(); $('#cv')?.focus(); return; }
+  if(t.id==='findq'){ if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); goFind(S.find.i+(e.shiftKey?-1:1)); return; } if(e.key==='Escape'){ e.preventDefault(); closeFind(); return; } }
+  if(S.view==='editor'&&S.doc&&!S.editing){ if(c&&!e.altKey&&e.key.toLowerCase()==='f'){ e.preventDefault(); openFind(); return; }
+    if(e.key==='F3'||(c&&e.key.toLowerCase()==='g')){ e.preventDefault(); if(!S.find) return openFind(); goFind(S.find.i+(e.shiftKey?-1:1)); return; } }
   if(typing) { if(e.key==='Escape'&&S.panel&&t.closest('#panelHost')){ e.preventDefault(); closePanel(); } return; }
   if(c&&e.shiftKey&&!e.altKey&&e.key.toLowerCase()==='v'&&(S.view==='editor'||S.view==='list')){ e.preventDefault(); act('mdImport'); return; }
   if(c&&!e.shiftKey&&e.key.toLowerCase()==='z'){ if(S.doc){e.preventDefault();undo();} return; }
@@ -225,9 +242,9 @@ function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
   <hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
-  <hr>${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
+  <hr>${S.canInstall?mi('install','download','安裝 App 到主畫面'):''}${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientRect();
-  openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('copyMd','copy','複製選取節點為 Markdown')}${mi('exp','outline','整張圖 Markdown（複製＋下載 .md）','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}<hr>${mi('mdImport','paste','從 Markdown 匯入／貼上…')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
+  openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('exp','note','PDF（A4，符合頁面）','','pdf')}${mi('copyMd','copy','複製節點為 Markdown')}${mi('exp','outline','整張圖 Markdown（.md）','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}<hr>${mi('mdImport','paste','貼上／匯入 Markdown…')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openCardMenu(id,trigger){ const m=maps.meta(id), r=trigger.getBoundingClientRect();
   const html=m.trashed?`${mi('restoreMap','undo','還原','',id)}<hr>${mi('purgeMap','trash','永久刪除','del',id)}`:`${mi('openMap','ext','開啟','',id)}${mi('renameMap','edit','重新命名','',id)}${mi('dupMap','copy','建立副本','',id)}${mi('starMap','star',m.star?'移除星號':'加星號','',id)}${mi('expMapMd','download','匯出 Markdown','',id)}<hr>${mi('trashMap','trash','移到垃圾桶','del',id)}`;
   openMenu(`<div class="ctx" role="menu" aria-label="${esc(m.title)} 的動作">${html}</div>`,trigger,{x:r.right,y:r.bottom+4,alignRight:true}); }
@@ -355,6 +372,7 @@ async function exportAs(kind,doc=S.doc){ const name=(doc.root.t||'mymind').repla
   if(kind==='json') return IO.download(name+'.mymind.json',JSON.stringify(doc,null,1),'application/json');
   const T=THEMES[doc.theme]||THEMES[DEFAULT_THEME]; const r=layout(clone(doc.root),T,doc.settings||{}); const {svg,b}=renderMap(r,T,{lightLines:S.lines==='light',edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw});
   const s=IO.svgString(svg,b,T.canvas); if(kind==='svg') return IO.download(name+'.svg',s.s,'image/svg+xml');
+  if(kind==='pdf'){ try{ IO.download(name+'.pdf',await IO.toPDF(s.s,s.w,s.h,{title:doc.root.t,bg:T.canvas})); toast('已下載 PDF（A4，符合頁面）'); }catch(e){ toast('PDF 匯出失敗：'+e.message); } return; }
   try{ IO.download(name+'.png',await IO.toPNG(s.s,s.w,s.h,2)); }catch(e){ toast(e.message); } }
 // ---------- Markdown clipboard (v1.2) ----------
 let CLIP=null;
@@ -468,6 +486,14 @@ async function act(a,v,el){ const f=selInfo();
   case 'moreMenu': openMoreMenu(el); break;
   case 'exportMenu': closeMenu(); openExportMenu(el&&el.closest('.right-actions')?el:$('.right-actions')); break;
   case 'exp': closeMenu(); exportAs(v); break;
+  case 'install': { closeMenu(); const ev=PWA.prompt; if(!ev) return toast('請用瀏覽器選單的「安裝應用程式／加到主畫面」'); PWA.prompt=null; S.canInstall=false; ev.prompt(); try{ const r=await ev.userChoice; if(r&&r.outcome==='dismissed') toast('已取消安裝，之後可以從「⋯」選單再安裝'); }catch{} render(); break; }
+  case 'installLater': prefs.set({installHide:new Date().toISOString()}); syncInfo(); render(); break;
+  case 'swReload': swReload(); break;
+  case 'swLater': $('#updbar')?.remove(); PWA.later=true; break;
+  case 'find': if(S.find&&isM()) closeFind(); else openFind(); break;
+  case 'findNext': goFind((S.find?.i??-1)+1); break;
+  case 'findPrev': goFind((S.find?.i??1)-1); break;
+  case 'findClose': closeFind(); break;
   case 'copyMd': { closeMenu(); if(!S.doc) return; const g=f||{n:S.doc.root,parent:null}; copyPayload(clipPayload(g.n,!g.parent),copyMsg(g.n)); break; }
   case 'pasteMd': closeMenu(); openMd({}); break;
   case 'mdImport': closeMenu(); openMd({}); break;
@@ -518,6 +544,7 @@ document.addEventListener('click',e=>{ if($('.navdrawer')&&e.target.closest('.na
 document.addEventListener('input',e=>{ const t=e.target; const k=t.dataset.input;
   if(k==='q'){ S.q=t.value; const pos=t.selectionStart; render(); const n=$('#homeq'); if(n){n.focus();n.setSelectionRange(pos,pos);} }
   else if(k==='sideQ'){ S.sideQ=t.value; const pos=t.selectionStart; const inDrawer=!!t.closest('.navdrawer'); const host=inDrawer?$('.navdrawer .side'):$('#side'); host.innerHTML=V.sidebar(S,maps.index()); const n=host.querySelector('#sideq'); n.focus(); n.setSelectionRange(pos,pos); }
+  else if(k==='find'&&S.find){ S.find.q=t.value; S.find.i=0; goFind(0); }
   else if(k==='mdText'&&S.dialog&&S.dialog.type==='md'){ S.dialog.md=t.value; updateMdPreview(); }
   else if(k==='note'){ clearTimeout(t._t); t._t=setTimeout(()=>{ const f=selInfo(); if(!f) return; const v=t.value; mutate(r=>{const x=find(r,f.n.id).n; if(v.trim()) x.note=v; else delete x.note;}); },400); } });
 document.addEventListener('change',e=>{ const t=e.target; if(t.dataset.input==='sort'){ S.sort=t.value; render(); } if(t.dataset.ai&&S.dialog) S.dialog[t.dataset.ai]=t.value; });
@@ -527,5 +554,24 @@ document.addEventListener('keydown',e=>{ // roving tabindex for tablists
 let rT; addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ shellKey=''; render(); },150); });
 addEventListener('hashchange',route);
 // boot
+// ---------- PWA (v1.3): offline shell, install prompt, update prompt ----------
+const PWA={prompt:null,reg:null,reloading:false,later:false,newVersion:''};
+window.__mmVersion=VERSION;
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); PWA.prompt=e; S.canInstall=true; if(S.view==='list') render(); });
+window.addEventListener('appinstalled',()=>{ PWA.prompt=null; S.canInstall=false; if(S.view==='list') render(); toast('已安裝 MyMind，可以從主畫面開啟'); });
+function showUpdate(){ if(PWA.later||$('#updbar')) return; document.body.insertAdjacentHTML('beforeend',V.updateBar(PWA.newVersion)); }
+async function swReload(){ const w=PWA.reg&&PWA.reg.waiting; if(S.editing) commitEdit(); try{ await storage.flush(); }catch{} PWA.reloading=true; $('#updbar')?.remove();
+  if(w) w.postMessage({type:'SKIP_WAITING'}); else location.reload(); setTimeout(()=>location.reload(),4000); }
+function askVersion(w){ try{ w.postMessage({type:'VERSION'}); }catch{} }
+if('serviceWorker' in navigator&&(location.protocol==='https:'||/^(localhost|127\.0\.0\.1)$/.test(location.hostname))&&!/[?&]nosw\b/.test(location.search)){
+  navigator.serviceWorker.addEventListener('message',e=>{ if(e.data&&e.data.type==='VERSION'&&e.data.version!==VERSION){ PWA.newVersion=e.data.version; const b=$('#updbar'); if(b) b.outerHTML=V.updateBar(PWA.newVersion); } });
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(PWA.reloading) location.reload(); });
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').then(reg=>{ PWA.reg=reg; window.__mmPWA=PWA;
+    const waiting=w=>{ if(navigator.serviceWorker.controller){ askVersion(w); showUpdate(); } };
+    if(reg.waiting) waiting(reg.waiting);
+    reg.addEventListener('updatefound',()=>{ const w=reg.installing; w&&w.addEventListener('statechange',()=>{ if(w.state==='installed') waiting(w); }); });
+    const check=()=>reg.update().catch(()=>{}); setInterval(check,30*60e3); document.addEventListener('visibilitychange',()=>{ if(!document.hidden) check(); });
+  }).catch(e=>console.warn('service worker:',e.message)); });
+}
 (async()=>{ await storage.init(); syncInfo(); applyUi(); route(); document.body.dataset.ready='1'; if(maps.index().length) askPersist(); if(remote()) syncAll(); })();
 window.__mmStore={maps,storage,flush:()=>storage.flush(),syncNow:o=>syncNow(o)}; // test hooks (no secrets)

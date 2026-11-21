@@ -108,6 +108,8 @@ export function renderMap(root,th,opt={}){
     if(n.collapsed&&n.c&&n.c.length){const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
       g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點"><circle data-g="collapse" data-gbg="${CV}" cx="${ccx}" cy="${ccy}" r="10" fill="${nodeBg}" stroke="${G(col)}" stroke-width="1.6"/><text x="${ccx}" y="${ccy+4}" font-size="11.5" font-weight="700" fill="${cfg}" data-bg="${nodeBg}" text-anchor="middle">${countDesc(n)}</text></g>`;}
     if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
+    if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
+      g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
     if(opt.sel===n.id&&!opt.thumb){
       g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
       const hx=n.x+n.w/2+(n.collapsed&&n.c&&n.c.length?44:22), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;

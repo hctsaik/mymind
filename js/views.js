@@ -1,6 +1,7 @@
 // HTML templates. Every function returns a string; app.js owns state and events (data-act attributes).
 import { I, esc, THEMES, DEFAULT_THEME, PRI } from './core.js';
 import { thumbSvg, themeThumb } from './mapview.js';
+import { VERSION } from './version.js';
 export const isMobile=()=>innerWidth<=768;
 const LOGO=`<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6" fill="#fff" stroke="none"/><path d="M8.6 12H11M11 6.5V17.5M11 6.5H19M11 12H19M11 17.5H19"/></svg>`;
 export function rel(iso){ if(!iso) return ''; const d=new Date(iso), s=(Date.now()-d)/1000;
@@ -34,7 +35,7 @@ export function savedChip(S){ const s=S.sync; let ic='cloud',l,sh;
   else {l='已同步到 GitHub'+(s.at?' · '+rel(s.at):'');sh='已同步';}
   return `<span class="saved ${s.state==='error'?'err':''}" role="status" aria-live="polite">${I(ic)}<span class="long">${esc(l)}</span><span class="short">${esc(sh)}</span></span>`;}
 export function topbar(S,doc,curNode){
-  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','備註','','Ctrl+Alt+M','note'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
+  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','備註','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
   return `<header class="top flt">
    <button class="icon-btn mobile-only rb backpill" data-act="home" aria-label="回到列表（目前節點：${esc(curNode)}）">${I('back')}<span class="cn">${esc(curNode)}</span></button>
    <div class="title"><h1 id="maptitle">${esc(doc.icon||'🧠')} ${esc(doc.root.t)}</h1>${savedChip(S)}</div>
@@ -45,6 +46,7 @@ export function topbar(S,doc,curNode){
      <button class="btn desk-only ${S.panel==='style'?'style-on':''}" data-act="style" aria-pressed="${S.panel==='style'}">${I('palette')}樣式</button>
      <button class="icon-btn mobile-only rb ai" data-act="ai" aria-label="AI">${I('spark')}</button>
      <button class="icon-btn mobile-only rb" data-act="style" aria-label="美化：主題與樣式">${I('wand')}</button>
+     <button class="icon-btn mobile-only rb" data-act="find" aria-label="搜尋節點" aria-pressed="${!!S.find}">${I('search')}</button>
      <button class="icon-btn mobile-only rb" data-act="outline" aria-label="大綱" aria-pressed="${!!S.outline}">${I('outline')}</button>
      <button class="icon-btn mobile-only rb" data-act="moreMenu" aria-haspopup="menu" aria-expanded="false" aria-label="更多：層級、縮放、匯出、歷史、設定">${I('more')}</button>
    </div></header>`;
@@ -52,7 +54,7 @@ export function topbar(S,doc,curNode){
 export function editorShell(S,doc,curNode){ const th=THEMES[doc.theme]||THEMES[DEFAULT_THEME], m=isMobile(), sheet=m&&S.panel;
   return `${topbar(S,doc,curNode)}<div class="canvas ${S.panel&&!m?'has-panel':''} ${S.outline?'outline-on':''} ${sheet?'sheet-open':''}" id="cv" tabindex="0" role="application" aria-roledescription="心智圖畫布" aria-label="心智圖：${esc(doc.root.t)}。Tab 新增子主題，Enter 新增同級，Space 編輯，Esc 離開畫布" style="--cv:${th.canvas};--cvdot:${th.canvas}">
      <div class="stage" id="stage"><svg class="map" id="mapsvg" role="tree" aria-label="節點"><g id="vp"></g></svg><div id="ovl"></div></div>
-     <div id="outlineHost"></div>
+     ${S.find?findbar(S):''}<div id="outlineHost"></div>
      <div class="cbar"><div class="levels" data-dock="${m?'right':'bottom'}" role="group" aria-label="展開到第幾層"><span>層級</span>${[1,2,3,0].map(l=>`<button data-act="level" data-v="${l}" aria-label="${l?'展開到第 '+l+' 層':'全部展開'}">${l||'全部'}</button>`).join('')}</div>${S.preview?`<span class="pvchip" role="status" data-dock="bottom">${I('history')}預覽 ${esc(S.preview.label)} · 唯讀</span>`:''}${S.hints&&!m?`<div class="hint" data-dock="bottom" aria-hidden="true"><span><span class="kbd">Tab</span>子主題</span><span><span class="kbd">Enter</span>同級</span><span><span class="kbd">Space</span>編輯</span><span><span class="kbd">Del</span>刪除</span><span><span class="kbd">Esc</span>離開畫布</span></div>`:''}</div>
      <div class="zoom ${S.minimap&&!m?'mini-on':''}" data-dock="${S.minimap||m?'right':'bottom'}"><div class="minimap" aria-label="小地圖"><svg id="mmsvg" aria-hidden="true"></svg><div class="vp" id="mmvp"></div></div>
        <div class="zctl"><button class="icon-btn" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pct" id="pct">100%</span><button class="icon-btn" data-act="zoomIn" aria-label="放大">${I('plus')}</button><span class="zsep"></span><button class="icon-btn" data-act="fit" aria-label="符合畫面">${I('fit')}</button><button class="icon-btn mm-t" data-act="minimap" aria-pressed="${!!S.minimap}" aria-label="小地圖">${I('mini')}</button><button class="icon-btn kb" data-act="shortcuts" aria-label="鍵盤快捷鍵（?）">${I('kb')}</button></div></div>
@@ -115,6 +117,9 @@ const DAY=864e5;
 function backupNote(S,n){ if(!n||S.remote) return ''; const p=S.prefs||{}; const last=p.lastBackup?Date.parse(p.lastBackup):0, snooze=p.backupSnooze?Date.parse(p.backupSnooze):0;
   if(Date.now()-last<7*DAY||Date.now()-snooze<3*DAY) return '';
   return `<div class="warnbox backupnote" role="note">${I('info')}<div><b>只存在這個瀏覽器。</b>清除瀏覽資料或網站資料時，圖會一起被刪除。${last?'上次備份 '+rel(p.lastBackup)+'。':'建議定期匯出一份備份。'}</div><div class="bacts"><button class="btn" data-act="backup">${I('download')}匯出備份</button><button class="btn ghost" data-act="dismissBackup">稍後</button></div></div>`; }
+function installNote(S){ const p=S.prefs||{}; if(!S.canInstall||(p.installHide&&Date.now()-Date.parse(p.installHide)<30*DAY)) return '';
+  return `<div class="installnote" role="note"><div class="iic" aria-hidden="true">${LOGO.replace('<svg ','<svg style="width:22px;height:22px" ')}</div><div class="itx"><b>把 MyMind 安裝到主畫面</b><span>像 App 一樣從桌面開啟，沒有網路也能看圖和編輯</span></div><div class="bacts"><button class="btn primary" data-act="install">${I('download')}安裝</button><button class="btn ghost" data-act="installLater">稍後</button></div></div>`; }
+export function updateBar(v){ return `<div class="updbar" id="updbar" role="status" aria-live="polite">${I('spark')}<span><b>有新版本${v?' v'+esc(v):''}</b><span class="ux">，重新整理就能使用</span></span><button class="btn primary" data-act="swReload">重新整理</button><button class="icon-btn" data-act="swLater" aria-label="稍後再說">${I('x')}</button></div>`; }
 export function home(S,list,docs){ const f=S.filter; const titles={all:'所有心智圖',starred:'已加星號',recent:'最近開啟',trash:'垃圾桶'};
   let items=list.filter(m=>f==='trash'?m.trashed:!m.trashed).filter(m=>f!=='starred'||m.star);
   if(f==='recent') items=items.filter(m=>m.opened).sort((a,b)=>(b.opened||'').localeCompare(a.opened||''));
@@ -129,7 +134,7 @@ export function home(S,list,docs){ const f=S.filter; const titles={all:'所有�
     :`<div class="empty">${EMPTY_ART}<h3>開始你的第一張心智圖</h3><p>從空白開始、讓 AI 整理一段筆記，或匯入 Markdown 大綱。<br>${S.remote?'先存在這個瀏覽器，同步時寫進你的私人儲存庫。':'圖會存在這個瀏覽器，不需要帳號；想多台裝置同步再連接 GitHub。'}</p>
       <div class="acts"><button class="btn primary" style="height:44px" data-act="new">${I('plus')}空白心智圖</button><button class="btn ai-go" style="height:44px" data-act="ai">${I('spark')}用 AI 產生</button><button class="btn" style="height:44px" data-act="mdImport">${I('paste')}匯入／貼上大綱</button></div></div>`;
   return `${homeTop(S,titles[f])}<div class="home" id="content"><h2>${f==='all'?'歡迎 👋':titles[f]}</h2><div class="sub">${live.length} 張心智圖 · 存在這個瀏覽器${S.remote?' · '+MODE_NAME[S.syncMode]+'到 '+esc(S.repo):''}</div>
-   ${backupNote(S,live.length)}
+   ${installNote(S)}${backupNote(S,live.length)}
    ${f==='all'?starter():''}
    ${items.length||q?`<div class="hbar"><label class="search">${I('search')}<span class="sr">搜尋心智圖標題</span><input id="homeq" data-input="q" value="${esc(S.q||'')}" placeholder="搜尋心智圖標題…" autocomplete="off"><span class="kbd desk-only">/</span></label>
      <div class="seg" style="margin-left:auto" role="group" aria-label="排序">${[['updated','最近編輯'],['name','名稱'],['created','建立時間']].map(([v,n])=>`<button data-act="sort" data-v="${v}" aria-pressed="${S.sort===v}">${n}</button>`).join('')}</div>
@@ -230,8 +235,8 @@ export function conflictDialog(C){ const d1=C.mineDiff,d2=C.theirsDiff;
    </div>
    <div class="mfoot"><span class="info">${I('info')}不論選哪個，都不會遺失資料</span><button class="btn" data-act="closeDialog">稍後</button><button class="btn primary" data-act="cfApply">套用</button></div>
   </div></div>`;}
-export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['Ctrl+C','複製節點（Markdown）'],['Ctrl+X','剪下節點'],['Ctrl+V','貼上 Markdown／節點'],['Ctrl+Shift+V','開啟「從 Markdown 匯入」'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','備註'],['Ctrl+1…5','優先順序'],['/','搜尋標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
-  return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kb-h" style="width:min(520px,100%)"><div class="mhead"><div class="spark" aria-hidden="true">${I('kb')}</div><div><h3 id="kb-h">鍵盤快捷鍵</h3><p>焦點在畫布上時使用</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody"><table class="kbt">${rows.map(([k,v])=>`<tr><td><span class="kbd">${k}</span></td><td>${v}</td></tr>`).join('')}</table></div></div></div>`;}
+export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['Ctrl+C','複製節點（Markdown）'],['Ctrl+X','剪下節點'],['Ctrl+V','貼上 Markdown／節點'],['Ctrl+Shift+V','開啟「從 Markdown 匯入」'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','備註'],['Ctrl+1…5','優先順序'],['Ctrl+F','搜尋節點（Enter 下一個、Shift+Enter 上一個）'],['F3 / Shift+F3','下一個／上一個符合'],['/','搜尋心智圖標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
+  return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kb-h" style="width:min(520px,100%)"><div class="mhead"><div class="spark" aria-hidden="true">${I('kb')}</div><div><h3 id="kb-h">鍵盤快捷鍵</h3><p>焦點在畫布上時使用 · MyMind v${VERSION}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody"><table class="kbt">${rows.map(([k,v])=>`<tr><td><span class="kbd">${k}</span></td><td>${v}</td></tr>`).join('')}</table></div></div></div>`;}
 export function promptDialog(P){ return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pr-h" style="width:min(440px,100%)"><div class="mhead"><div><h3 id="pr-h">${esc(P.title)}</h3>${P.sub?`<p>${esc(P.sub)}</p>`:''}</div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody">${P.input!==undefined?`<div class="field"><label for="pr-in">${esc(P.label||'')}</label><div class="inp"><input id="pr-in" value="${esc(P.input)}" autocomplete="off"></div></div>`:''}</div><div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn ${P.danger?'danger':'primary'}" data-act="promptOk">${esc(P.ok||'確定')}</button></div></div></div>`;}
 
 // ---------- Markdown import dialog (v1.2) ----------
@@ -252,3 +257,7 @@ export function mdDialog(D,tree,count){ const radio=(v,t,sub)=>`<button class="r
      <div class="mdcol"><div class="mdlab" id="md-count" aria-live="polite">預覽 · 共 ${count} 個節點</div><div class="preview mdprev" id="md-prev">${mdPreview(tree,count)}</div></div>
     </div></div>
    <div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn primary" id="md-ok" data-act="mdOk"${count?'':' disabled'}>${mdOkLabel(D,count)}</button></div></div></div>`; }
+
+// ---------- node search bar (v1.3) ----------
+export function findCount(F){ if(!F||!F.q.trim()) return ''; if(!F.hits.length) return '找不到'; return `${F.i+1} / ${F.hits.length}`; }
+export function findbar(S){ const F=S.find; return `<div class="findbar" id="findbar" role="search" aria-label="搜尋節點"><span class="fic" aria-hidden="true">${I('search')}</span><label class="sr" for="findq">搜尋節點</label><input id="findq" data-input="find" value="${esc(F.q)}" placeholder="搜尋節點文字或備註" autocomplete="off" spellcheck="false" enterkeyhint="search"><span class="fcount" id="findcount" aria-live="polite">${findCount(F)}</span><button class="icon-btn" data-act="findPrev" aria-label="上一個（Shift+Enter）">${I('up')}</button><button class="icon-btn" data-act="findNext" aria-label="下一個（Enter）">${I('chevD')}</button><button class="icon-btn" data-act="findClose" aria-label="關閉搜尋（Esc）">${I('x')}</button></div>`; }

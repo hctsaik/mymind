@@ -597,3 +597,31 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .linkbtn{color:var(--accent-text,var(--accent));text-decoration:underline;font:inherit;min-height:44px;padding:0 4px}
 .pastebin{position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
 @media (max-width:768px){.mdgrid{grid-template-columns:1fr;gap:12px}.mdta{height:170px}.mdprev{height:220px}.mdtarget{grid-template-columns:1fr}}
+
+/* v1.3 node search */
+.findbar{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-2);padding:4px 4px 4px 12px;width:min(460px,calc(100% - 24px))}
+.canvas.has-panel .findbar{left:calc(50% - 165px);width:min(420px,calc(100% - 380px))}
+.findbar .fic svg{width:18px;height:18px;color:var(--text-2)}
+.findbar input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:inherit;font-size:14px;color:var(--text);height:40px;padding:0 8px}
+.findbar input::placeholder{color:var(--text-3)}
+.findbar:focus-within{border-color:var(--accent);box-shadow:var(--shadow-2),0 0 0 3px var(--accent-soft)}
+.findbar .fcount{font-size:12.5px;color:var(--text-2);white-space:nowrap;padding:0 6px;font-variant-numeric:tabular-nums}
+.findbar .icon-btn{width:40px;height:40px;flex:none}
+@media (max-width:768px){.findbar{top:76px;left:10px;right:10px;transform:none;width:auto}.findbar .icon-btn{width:44px;height:44px}.findbar input{height:44px}}
+
+/* v1.3 PWA: install note + update bar */
+.installnote{margin:12px 0 4px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--accent-soft);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px}
+.installnote .iic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:#3F51E8;flex:none}
+.installnote .itx{flex:1;min-width:200px;display:flex;flex-direction:column;font-size:12.5px;color:var(--text-2);line-height:1.5}
+.installnote .itx b{font-size:13.5px;color:var(--text)}
+.installnote .bacts{display:flex;gap:8px;flex:none}
+.installnote .btn{height:36px}
+.updbar{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:60;display:flex;align-items:center;gap:10px;background:var(--text);color:var(--panel);border-radius:14px;padding:8px 8px 8px 14px;box-shadow:var(--shadow-2);font-size:13.5px;max-width:calc(100% - 20px)}
+.updbar>svg{width:18px;height:18px;flex:none}
+.updbar .btn.primary{height:36px;white-space:nowrap}
+.updbar .icon-btn{color:var(--panel);width:36px;height:36px;flex:none}
+@media (max-width:768px){.installnote .btn,.updbar .btn.primary{height:44px}.updbar .icon-btn{width:44px;height:44px}.updbar{bottom:96px;width:calc(100% - 20px);font-size:13px}}
+
+.installnote .iic{color:#fff}
+@media (max-width:480px){.updbar .ux{display:none}.updbar>span{flex:1}}
+.installnote .iic svg{stroke:#fff;stroke-width:1.8;fill:none;stroke-linecap:round}

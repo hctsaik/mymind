@@ -81,13 +81,16 @@
   Alt+↑↓ 調整順序、方向鍵移動選取、拖曳節點改變位置（放到上方／下方／成為子節點）、Ctrl+Z / Ctrl+Y。
 - 圖示、優先順序 1–5、完成勾選、螢光標記、備註（Ctrl+Alt+M）。
 - 樣式抽屜（Alt+Y）：10 種主題（預設「珊瑚」）、節點、線條（括號／曲線／直線、粗細、間距）、畫布。
+- 搜尋節點（Ctrl+F，手機在頂端的放大鏡）：即時標出所有符合的節點（標題和備註都會找），Enter／F3 下一個、Shift+Enter／Shift+F3 上一個，收合中的分支會自動展開並移到畫面中央，Esc 關閉。
 - 大綱檢視（Ctrl+O）、心智圖清單（搜尋、排序、星號、垃圾桶）、快捷鍵說明（?）。
 - 設定 → 外觀與無障礙：淺色線條、深色介面、減少動態效果。
 - 同步：每次修改先存在瀏覽器，3 秒後自動推到 GitHub（Ctrl+S 立即儲存）；離線時保留修改，恢復連線後自動同步。
 - 衝突：另一台裝置先改過時，可以選「合併兩邊」「保留我的」或「改用雲端（我的另存副本）」。
 - 版本紀錄：每次儲存是一個 commit，可以預覽舊版本並還原。
 - AI：輸入主題或貼上筆記產生新圖；選一個節點用 AI 展開（Ctrl+J）。
-- 匯入 Markdown / OPML / .mymind.json / .mymind 備份；匯出 PNG（2x）、SVG、Markdown、OPML、JSON。
+- 匯入 Markdown / OPML / .mymind.json / .mymind 備份；匯出 PNG（2x）、SVG、PDF（A4 一頁、自動橫／直向符合頁面）、Markdown、OPML、JSON。
+- 安裝成 App（PWA）：Android Chrome 會在首頁顯示「把 MyMind 安裝到主畫面」，也可以從「⋯」選單安裝；iPhone 請用 Safari 的「分享 › 加入主畫面」。安裝後沒有網路也能開啟、看圖和編輯（同步和 AI 需要網路）。
+- 更新：有新版本時畫面下方會出現「有新版本，重新整理」，按下才會切換，不會在編輯途中突然重新載入。
 
 ### Markdown 複製／貼上
 
@@ -106,10 +109,19 @@
 python3 -m http.server 8765     # 然後打開 http://localhost:8765/
 npm i                           # 只有測試需要（playwright-core）
 node tests/markdown.mjs         # Markdown 解析／匯出單元測試（不需瀏覽器）
+node tests/pwa.mjs              # 離線、可安裝、更新提示（會自己開一個暫時的伺服器）
 node tests/e2e.mjs              # 端對端測試（GitHub 和 OpenAI 都是模擬的）：只存瀏覽器、手動同步、自動批次同步、備份還原、舊資料搬移
 GH_TOKEN=… node tests/roundtrip.mjs   # 對真的 mymind-data 做讀寫往返（金鑰只從環境變數讀，結束會刪掉測試圖）
 node tests/audit.mjs            # 對比度 / 點擊範圍 / 重疊檢查
-git config core.hooksPath .githooks   # 啟用提交前的金鑰檢查
+git config core.hooksPath .githooks   # 啟用提交前的金鑰檢查和版本檢查
+```
+
+### 發佈新版本
+
+改了 `index.html`、`css/`、`js/`、`icons/` 時，請把 `sw.js` 和 `js/version.js` 的 `VERSION` 一起加一（提交前的檢查會擋下忘記改版本的提交）。新增 JS／CSS 檔案時也要加進 `sw.js` 的 `SHELL` 清單。
+
+```bash
+bash scripts/check-version.sh   # 檢查版本一致、離線清單完整
 ```
 
 測試需要 Chromium；可以用 `CHROME=/path/to/chrome` 指定。
@@ -127,6 +139,9 @@ js/merge.js         三方合併（依節點 id）
 js/ai.js            OpenAI Chat Completions
 js/io.js            匯入／匯出
 js/store.js         IndexedDB（圖）＋ localStorage（設定、金鑰）
+js/version.js       版本號（和 sw.js 一致）
+sw.js               Service worker：離線 App 外殼、版本快取
+manifest.webmanifest、icons/   PWA 安裝資訊與圖示（scripts/make-icons.mjs 重新產生）
 ```
 
 設計文件原本規劃 Vite + TypeScript；依需求改成不需要建置的純 JS 版本。

@@ -68,3 +68,29 @@ export function download(name,data,type){ const b=data instanceof Blob?data:new 
 export function svgString(svgInner,b,bg,pad=40){ const w=Math.ceil(b.w+pad*2),h=Math.ceil(b.h+pad*2);
   return {w,h,s:`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${b.x0-pad} ${b.y0-pad} ${w} ${h}" font-family='"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif'><rect x="${b.x0-pad}" y="${b.y0-pad}" width="${w}" height="${h}" fill="${bg}"/>${svgInner}</svg>`}; }
 export function toPNG(svg,w,h,scale=2){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>{ const c=document.createElement('canvas'); c.width=w*scale; c.height=h*scale; const x=c.getContext('2d'); x.scale(scale,scale); x.drawImage(img,0,0); c.toBlob(b=>b?res(b):rej(new Error('PNG 失敗')),'image/png'); }; img.onerror=()=>rej(new Error('PNG 失敗')); img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); }); }
+
+// ---------- PDF (v1.3): one A4 page, map fitted, rendered image embedded losslessly (FlateDecode) ----------
+const enc=new TextEncoder();
+function pdfText(s){ // UTF-16BE hex string with BOM, safe for any title
+  let h='FEFF'; for(const ch of String(s)){ const cp=ch.codePointAt(0); if(cp>0xFFFF){ const v=cp-0x10000; h+=(0xD800+(v>>10)).toString(16).padStart(4,'0')+(0xDC00+(v&0x3FF)).toString(16).padStart(4,'0'); } else h+=cp.toString(16).padStart(4,'0'); } return '<'+h.toUpperCase()+'>'; }
+async function deflate(bytes){ if(typeof CompressionStream==='undefined') return null; const cs=new CompressionStream('deflate'); const out=new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer(); return new Uint8Array(await out); }
+function hexRGB(c){ const m=/^#?([0-9a-f]{6})$/i.exec(c||''); const v=m?parseInt(m[1],16):0xFFFFFF; return [(v>>16)/255,((v>>8)&255)/255,(v&255)/255].map(x=>x.toFixed(3)).join(' '); }
+export async function toPDF(svg,w,h,{title='MyMind',bg='#FFFFFF',maxPx=4096}={}){
+  const land=w>h, PW=land?841.89:595.28, PH=land?595.28:841.89, M=28;
+  const fit=Math.min((PW-2*M)/w,(PH-2*M)/h), dw=w*fit, dh=h*fit;
+  const scale=Math.max(1,Math.min(3,maxPx/Math.max(w,h),(dw/72*200)/w)); // ~200 dpi on paper, capped
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('PDF 失敗')); i.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); });
+  const c=document.createElement('canvas'); c.width=Math.round(w*scale); c.height=Math.round(h*scale); const x=c.getContext('2d'); x.fillStyle=bg; x.fillRect(0,0,c.width,c.height); x.scale(scale,scale); x.drawImage(img,0,0);
+  let data,filter; const raw=x.getImageData(0,0,c.width,c.height).data; const rgb=new Uint8Array(c.width*c.height*3); for(let i=0,j=0;i<raw.length;i+=4){ rgb[j++]=raw[i]; rgb[j++]=raw[i+1]; rgb[j++]=raw[i+2]; }
+  const z=await deflate(rgb); if(z){ data=z; filter='/FlateDecode'; } else { data=new Uint8Array(await (await new Promise(r=>c.toBlob(r,'image/jpeg',.92))).arrayBuffer()); filter='/DCTDecode'; }
+  const ox=(PW-dw)/2, oy=(PH-dh)/2;
+  const content=`q ${hexRGB(bg)} rg 0 0 ${PW} ${PH} re f Q\nq ${dw.toFixed(2)} 0 0 ${dh.toFixed(2)} ${ox.toFixed(2)} ${oy.toFixed(2)} cm /Im0 Do Q\n`;
+  const objs=[`<< /Type /Catalog /Pages 2 0 R >>`,`<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`,
+    [`<< /Length ${enc.encode(content).length} >>\nstream\n`,enc.encode(content),`\nendstream`],
+    [`<< /Type /XObject /Subtype /Image /Width ${c.width} /Height ${c.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter ${filter} /Length ${data.length} >>\nstream\n`,data,`\nendstream`],
+    `<< /Title ${pdfText(title)} /Producer (MyMind) /CreationDate (D:${new Date().toISOString().replace(/[-:T]/g,'').slice(0,14)}Z) >>`];
+  const parts=[enc.encode('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')]; let off=parts[0].length; const xref=[];
+  objs.forEach((o,i)=>{ xref.push(off); const seg=[`${i+1} 0 obj\n`,...(Array.isArray(o)?o:[o]),`\nendobj\n`].map(p=>typeof p==='string'?enc.encode(p):p); seg.forEach(p=>{parts.push(p); off+=p.length;}); });
+  const xs=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n${xref.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size ${objs.length+1} /Root 1 0 R /Info ${objs.length} 0 R >>\nstartxref\n${off}\n%%EOF\n`;
+  parts.push(enc.encode(xs)); return new Blob(parts,{type:'application/pdf'}); }

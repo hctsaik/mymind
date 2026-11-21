@@ -382,6 +382,73 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   ok('migrated map waits for manual sync', gh.commits.length===0&&(await p.locator('#side .syncbtn .nbadge').textContent())==='1');
   ok('no runtime errors (migration)', p.errs.length===0, p.errs.join(' | ').slice(0,300));
   await ctx.close(); }
+// ================= v1.3: node search, PDF/SVG export, install prompt (desktop) =================
+{ const {ctx,p}=await setup({width:1440,height:900}); const fs=await import('node:fs'); const {execFileSync}=await import('node:child_process');
+  await ctx.addInitScript(()=>{ if(!localStorage['mymind.prefs']) localStorage.setItem('mymind.prefs',JSON.stringify({mode:'local',sync:'local'})); });
+  await p.goto(BASE); await ready(p); await W(200);
+  await p.click('[data-act="mdImport"]'); await W(150);
+  await p.fill('#md-in','# 名古屋旅行\n## 行程\n- Day 1\n  - 熱田神宮\n  - 名古屋城\n- Day 2\n  - 犬山城\n  - 大須商店街\n## 美食\n- 味噌豬排\n  > 矢場町本店要排隊\n- 鰻魚飯'); await p.click('#md-ok'); await W(500);
+  const tr=()=>p.evaluate(()=>window.__mm.doc.root);
+  // collapse Day 2 so the second 城 is hidden
+  await p.locator('#mapsvg g.node',{hasText:'Day 2'}).first().click(); await p.keyboard.press('Control+.'); await W(100);
+  ok('setup: Day 2 collapsed (犬山城 hidden)', await p.locator('#mapsvg g.node',{hasText:'犬山城'}).count()===0);
+  ok('toolbar has 搜尋 (Ctrl+F)', await p.locator('.tb [data-act="find"]').count()===1);
+  await p.locator('#mapsvg g.node',{hasText:'名古屋旅行'}).first().click(); await p.keyboard.press('Control+f'); await W(150);
+  ok('Ctrl+F opens search bar with focus', await p.locator('#findbar').count()===1&&await p.evaluate(()=>document.activeElement.id==='findq'));
+  await p.keyboard.type('城'); await W(200);
+  ok('typing finds matches incl. hidden nodes: 1 / 2', (await p.textContent('#findcount')).trim()==='1 / 2', await p.textContent('#findcount'));
+  ok('first match selected + highlighted', await p.evaluate(()=>{const s=window.__mm; const f=(n)=>n.t==='名古屋城'?n:(n.c||[]).map(f).find(Boolean); return s.sel===f(s.doc.root).id;})&&await p.locator('#mapsvg rect.findhit.cur').count()===1);
+  await p.screenshot({path:SHOTS+'/29-search-desktop.png'});
+  await p.keyboard.press('Enter'); await W(250);
+  ok('Enter → next match (2 / 2)', (await p.textContent('#findcount')).trim()==='2 / 2');
+  ok('next match: collapsed ancestor auto-expanded', await p.locator('#mapsvg g.node',{hasText:'犬山城'}).count()===1&&await p.evaluate(()=>{const d=(n)=>n.t==='Day 2'?n:(n.c||[]).map(d).find(Boolean); return !d(window.__mm.doc.root).collapsed;}));
+  { const nb=await p.locator('#mapsvg g.node',{hasText:'犬山城'}).first().boundingBox(), sb=await p.locator('#stage').boundingBox();
+    ok('map pans to the match (near stage centre)', Math.abs(nb.x+nb.width/2-(sb.x+sb.width/2))<60&&nb.y>sb.y+56&&nb.y+nb.height<sb.y+sb.height, JSON.stringify({nb,sb})); }
+  ok('focus stays in the search box', await p.evaluate(()=>document.activeElement.id==='findq'));
+  await p.keyboard.press('Enter'); await W(150); ok('Enter wraps to 1 / 2', (await p.textContent('#findcount')).trim()==='1 / 2');
+  await p.keyboard.press('Shift+Enter'); await W(150); ok('Shift+Enter → previous (2 / 2)', (await p.textContent('#findcount')).trim()==='2 / 2');
+  await p.fill('#findq','排隊'); await W(200); ok('searches notes too', (await p.textContent('#findcount')).trim()==='1 / 1'&&await p.evaluate(()=>{const s=window.__mm; const f=(n)=>n.t==='味噌豬排'?n:(n.c||[]).map(f).find(Boolean); return s.sel===f(s.doc.root).id;}));
+  await p.fill('#findq','ＤＡＹ'); await W(200); ok('case/width-insensitive (ＤＡＹ finds Day 1, Day 2)', (await p.textContent('#findcount')).trim()==='1 / 2');
+  await p.fill('#findq','不存在的字'); await W(200); ok('no match shows 找不到', (await p.textContent('#findcount')).trim()==='找不到'&&await p.locator('#mapsvg rect.findhit').count()===0);
+  const u0=await p.evaluate(()=>window.__mm.undo.length);
+  await p.keyboard.press('Escape'); await W(150);
+  ok('Esc closes search, focus back to canvas, highlights gone', await p.locator('#findbar').count()===0&&await p.evaluate(()=>document.activeElement.id==='cv')&&await p.locator('#mapsvg rect.findhit').count()===0);
+  ok('searching adds no undo steps', await p.evaluate(()=>window.__mm.undo.length)===u0);
+  await p.keyboard.press('?'); await W(150); const kbt=await p.locator('.dlg').textContent(); ok('shortcuts dialog lists Ctrl+F, F3 and the version', kbt.includes('Ctrl+F')&&kbt.includes('F3')&&kbt.includes('v1.3.0')); await p.keyboard.press('Escape'); await W(100);
+  await p.keyboard.press('F3'); await W(100); ok('F3 opens search too', await p.locator('#findbar').count()===1); await p.keyboard.press('Escape'); await W(100);
+  await p.click('.tb [data-act="find"]'); await W(100); ok('toolbar 搜尋 button opens search', await p.locator('#findbar').count()===1); await p.click('[data-act="findClose"]'); await W(100);
+  // export menu: PNG / SVG / PDF
+  await p.click('[data-act="exportMenu"]'); await W(150);
+  ok('export menu lists PNG, SVG, PDF', await p.locator('[data-act="exp"][data-v="pdf"]').count()===1&&await p.locator('[data-act="exp"][data-v="svg"]').count()===1&&await p.locator('[data-act="exp"][data-v="png"]').count()===1);
+  await p.screenshot({path:SHOTS+'/31-export-menu-desktop.png'});
+  const [dpdf]=await Promise.all([p.waitForEvent('download',{timeout:15000}).catch(()=>null),p.click('[data-act="exp"][data-v="pdf"]')]);
+  let pdfOk=false, info=''; if(dpdf){ const fp=await dpdf.path(); const buf=fs.readFileSync(fp); fs.copyFileSync(fp,'/tmp/mm/export.pdf');
+    try{ info=execFileSync('pdfinfo',[fp]).toString(); execFileSync('pdftoppm',['-png','-r','50','-singlefile',fp,SHOTS+'/32-pdf-export-page']); }catch(e){ info='ERR '+e.message; }
+    pdfOk=buf.slice(0,5).toString()==='%PDF-'&&/Pages:\s+1/.test(info)&&/Page size:\s+841\.89 x 595\.28/.test(info)&&dpdf.suggestedFilename()==='名古屋旅行.pdf'; }
+  ok('export PDF: valid 1-page A4 landscape, named after map', pdfOk, info.replace(/\n/g,' ').slice(0,160));
+  ok('PDF title metadata is the map title', /Title:\s+名古屋旅行/.test(info));
+  ok('PDF page renders (poppler)', fs.existsSync(SHOTS+'/32-pdf-export-page.png')&&fs.statSync(SHOTS+'/32-pdf-export-page.png').size>3000);
+  await p.click('[data-act="exportMenu"]'); await W(150);
+  const [dsvg]=await Promise.all([p.waitForEvent('download',{timeout:5000}).catch(()=>null),p.click('[data-act="exp"][data-v="svg"]')]);
+  const svgTxt=dsvg?fs.readFileSync(await dsvg.path(),'utf8'):'';
+  ok('export SVG: well-formed, contains node text', svgTxt.startsWith('<svg')&&svgTxt.includes('犬山城')&&await p.evaluate(t=>!new DOMParser().parseFromString(t,'image/svg+xml').querySelector('parsererror'),svgTxt));
+  await p.click('[data-act="exportMenu"]'); await W(150);
+  const [dpng]=await Promise.all([p.waitForEvent('download',{timeout:8000}).catch(()=>null),p.click('[data-act="exp"][data-v="png"]')]);
+  let pw=0; if(dpng){ const buf=fs.readFileSync(await dpng.path()); pw=buf.readUInt32BE(16); }
+  const sw=+svgTxt.match(/width="(\d+)"/)[1]; ok('export PNG is 2x the SVG size', pw===sw*2, pw+' vs '+sw);
+  // install prompt (Android Chrome fires beforeinstallprompt)
+  await p.goto(BASE+'#/'); await W(200); ok('no install note without the browser event', await p.locator('.installnote').count()===0);
+  const fire=()=>p.evaluate(()=>{ const e=new Event('beforeinstallprompt',{cancelable:true}); e.prompt=()=>{ window.__prompted=(window.__prompted||0)+1; return Promise.resolve(); }; e.userChoice=Promise.resolve({outcome:'accepted',platform:'web'}); window.dispatchEvent(e); return e.defaultPrevented; });
+  ok('beforeinstallprompt is captured (mini-infobar suppressed)', await fire()); await W(150);
+  ok('home shows 安裝到主畫面 note', await p.locator('.installnote [data-act="install"]').count()===1);
+  await p.screenshot({path:SHOTS+'/33-install-prompt-desktop.png'});
+  await p.click('.installnote [data-act="install"]'); await W(200);
+  ok('安裝 calls the browser prompt and hides the note', await p.evaluate(()=>window.__prompted)===1&&await p.locator('.installnote').count()===0);
+  await fire(); await W(100); await p.click('.installnote [data-act="installLater"]'); await W(100);
+  ok('稍後 hides the note and remembers it', await p.locator('.installnote').count()===0&&await p.evaluate(()=>!!window.__mm.prefs.installHide));
+  await p.reload(); await ready(p); await fire(); await W(150); ok('稍後 survives reload (30 days)', await p.locator('.installnote').count()===0);
+  ok('no runtime errors (v1.3 desktop)', p.errs.length===0, p.errs.join(' | ').slice(0,300));
+  await ctx.close(); }
 // ================= mobile =================
 { const {ctx,p}=await setup({width:390,height:844},{mobile:true});
   await p.goto(BASE); await ready(p); await p.screenshot({path:SHOTS+'/12-welcome-mobile.png'});
@@ -409,11 +476,28 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
     const ob=await p.locator('#md-ok').boundingBox(); ok('mobile md dialog: button ≥44px, fits screen', ob&&ob.height>=44&&ob.x+ob.width<=390, JSON.stringify(ob));
     const before=await nodes(p); await p.click('#md-ok'); await W(300);
     ok('mobile md dialog inserts nodes', await nodes(p)===before+3, (await nodes(p))+' vs '+before); }
+  // v1.3 mobile: search button, export menu, install note
+  { const sb=await p.locator('.top .rb[data-act="find"]').boundingBox(); ok('mobile toolbar has search ≥44px', sb&&sb.width>=44&&sb.height>=44, JSON.stringify(sb));
+    const tops=await p.evaluate(()=>[...document.querySelectorAll('.top.flt > *, .top.flt .right-actions > *')].filter(e=>e.offsetParent).map(e=>{const r=e.getBoundingClientRect(); return [r.left,r.right];}));
+    ok('mobile top bar fits 390px', tops.every(([l,r])=>l>=0&&r<=390), JSON.stringify(tops));
+    await p.click('.top .rb[data-act="find"]'); await W(200); await p.keyboard.type('子'); await W(200);
+    ok('mobile search finds + selects', (await p.textContent('#findcount')).trim()==='1 / 1'&&await p.locator('#mapsvg rect.findhit.cur').count()===1, await p.textContent('#findcount'));
+    const fb=await p.locator('#findbar').boundingBox(); ok('mobile search bar below top bar, full width', fb.y>=60&&fb.width>=360, JSON.stringify(fb));
+    await p.screenshot({path:SHOTS+'/30-search-mobile.png'});
+    await p.click('.top .rb[data-act="find"]'); await W(150); ok('mobile search button toggles it closed', await p.locator('#findbar').count()===0);
+    await p.click('[data-act="moreMenu"]'); await W(200); await p.click('.mmenu [data-act="exportMenu"]'); await W(200);
+    ok('mobile export menu has PDF', await p.locator('[data-act="exp"][data-v="pdf"]').count()===1);
+    await p.screenshot({path:SHOTS+'/34-export-menu-mobile.png'}); await p.keyboard.press('Escape'); await W(100);
+    }
   ok('AI bar with × inside', await p.locator('#aiq').count()===1&&await p.locator('[data-act="aibarClose"]').count()===1);
   await p.click('[data-act="aibarClose"]'); await W(100); ok('AI bar closes', await p.locator('#aiq').count()===0);
   await p.click('[data-act="style"].mobile-only'); await W(250); await p.screenshot({path:SHOTS+'/14-style-mobile.png'});
   ok('mobile style sheet opens', await p.locator('[role=tabpanel]').count()>=1);
   await p.goto(BASE+'#/'); await W(200); await p.screenshot({path:SHOTS+'/15-list-mobile.png'});
+  await p.evaluate(()=>{ const e=new Event('beforeinstallprompt',{cancelable:true}); e.prompt=()=>Promise.resolve(); e.userChoice=Promise.resolve({outcome:'dismissed'}); window.dispatchEvent(e); }); await W(150);
+  { const ib=await p.locator('.installnote [data-act="install"]').boundingBox(); ok('mobile install note, button ≥44px', ib&&ib.height>=44, JSON.stringify(ib)); }
+  await p.screenshot({path:SHOTS+'/35-install-prompt-mobile.png'});
+  await p.click('.installnote [data-act="install"]'); await W(200); ok('mobile: dismissed install keeps working, toast explains', /已取消安裝/.test(await p.evaluate(()=>document.querySelector('#toast.on')?.textContent||'')));
   ok('no runtime errors (mobile)', p.errs.length===0, p.errs.join(' | ').slice(0,300));
   await ctx.close(); }
 // ================= mobile, manual sync button =================

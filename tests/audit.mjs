@@ -38,6 +38,7 @@ for(const [w,h] of [[1440,900],[390,844]]){
   { const p=await page(w,h,{prefs:null}); await audit(p,'welcome'); await p.ctx.close(); }
   { const p=await page(w,h); await audit(p,'empty'); await p.ctx.close(); }
   // list
+  { const p=await page(w,h,{docs}); await p.evaluate(()=>{ const e=new Event('beforeinstallprompt',{cancelable:true}); e.prompt=()=>Promise.resolve(); e.userChoice=Promise.resolve({outcome:'dismissed'}); window.dispatchEvent(e); }); await p.waitForTimeout(200); await audit(p,'install-note'); await p.evaluate(()=>{ document.body.insertAdjacentHTML('beforeend','<div class="updbar" id="updbar" role="status"><span><b>有新版本 v9.9.9</b>，重新整理就能使用</span><button class="btn primary">重新整理</button><button class="icon-btn" aria-label="稍後再說">x</button></div>'); }); await audit(p,'update-bar'); await p.ctx.close(); }
   { const p=await page(w,h,{docs}); await audit(p,'list'); if(w<700){ await act(p,'nav'); await audit(p,'nav-drawer'); } await p.ctx.close(); }
   // every theme on the trip map, plus light lines
   for(const t of THEMES){ const d=docOf(trip(),t); const p=await page(w,h,{docs:[d],hash:'#/map/'+d.id}); await audit(p,'theme-'+t); await p.ctx.close(); }
@@ -49,6 +50,7 @@ for(const [w,h] of [[1440,900],[390,844]]){
     await act(p,'style'); for(const tab of ['theme','node','layout','canvas']){ await act(p,'tab',tab); await audit(p,'style-'+tab); } await act(p,'closePanel').catch(()=>{});
     await selectL1(p); await p.keyboard.press('Control+Alt+m'); await p.waitForTimeout(300); await audit(p,'note'); await act(p,'closePanel').catch(()=>{});
     await act(p,'outline'); await audit(p,'outline'); await act(p,'outline');
+    { await act(p,'find'); const ch=await p.evaluate(()=>window.__mm.doc.root.c[0].t.slice(0,1)); await p.keyboard.type(ch); await p.waitForTimeout(250); await audit(p,'search'); await p.fill('#findq','zzzz'); await p.waitForTimeout(150); await audit(p,'search-none'); await p.keyboard.press('Escape'); await p.waitForTimeout(150); }
     if(w<700){ await act(p,'moreMenu'); await audit(p,'more-menu'); await p.keyboard.press('Escape'); }
     else { await act(p,'exportMenu'); await audit(p,'export-menu'); await p.keyboard.press('Escape'); }
     const nb=await p.locator('#mapsvg g.node').nth(2).boundingBox(); await p.mouse.click(nb.x+nb.width/2,nb.y+nb.height/2,{button:'right'}); await p.waitForTimeout(200); await audit(p,'node-menu'); await p.keyboard.press('Escape');
