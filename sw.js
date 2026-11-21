@@ -1,6 +1,6 @@
 // MyMind service worker: offline app shell. Every release bumps VERSION, which creates a fresh cache;
 // the page then shows 「有新版本，重新整理」 and switches only when the user taps it.
-const VERSION='1.5.0';
+const VERSION='1.5.1';
 const CACHE='mymind-'+VERSION;
 const SHELL=['./','index.html','manifest.webmanifest','css/app.css',
   'js/app.js','js/ai.js','js/core.js','js/gdrive.js','js/github.js','js/io.js','js/mapview.js','js/merge.js','js/store.js','js/version.js','js/views.js',

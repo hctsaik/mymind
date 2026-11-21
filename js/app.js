@@ -194,7 +194,13 @@ function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id);
     else if(e.key==='Tab'){e.preventDefault();commitEdit();if(e.shiftKey)outdent();else addChild();} });
   ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';});
   ta.addEventListener('blur',()=>setTimeout(()=>{ if(S.editing&&S.editing.id===id&&document.activeElement!==ta) commitEdit(); },0)); }
-function positionEditor(){ const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
+// phones: a small floating bar over the selected node — ✏️ 編輯 opens the editor from a real tap (keyboard shows), ⋯ the node menu
+function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector('.nodetb'); const n=lay&&S.sel&&lay.by.get(S.sel);
+  if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.view!=='editor'){ tb&&tb.remove(); return; }
+  if(!tb){ o.insertAdjacentHTML('beforeend',`<div class="nodetb" role="toolbar" aria-label="選取的節點"><button class="btn" data-act="edit" aria-label="編輯文字">${I('edit')}<span>編輯</span></button><button class="btn" data-act="nodeMenuTb" aria-label="更多節點動作">${I('more')}</button></div>`); tb=o.querySelector('.nodetb'); }
+  const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, W=o.clientWidth||innerWidth, w=tb.offsetWidth||140; let x=Math.max(8,Math.min(W-w-8,cx-w/2)), y=top-54; if(y<64) y=ty+(n.y+n.h/2)*sc+10;
+  tb.style.left=x+'px'; tb.style.top=y+'px'; }
+function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
   const fs=n.d===0?22:n.d===1?16:14; Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
 function commitEdit(){ const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; ta.remove();
   if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); }
@@ -204,7 +210,9 @@ function nodeAt(e){ let t=e.target; if(t&&t.id==='stage'||t&&t.closest&&!t.close
 function stagePoint(e){ const r=$('#stage').getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
 function worldAt(x,y){ const {tx,ty,sc}=S.vp; return [(x-tx)/sc,(y-ty)/sc]; }
 function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map(); let pan=null, drag=null, pinch=null, lp=null;
-  st.addEventListener('pointerdown',e=>{ if(e.target.closest('.editbox')||e.button===2) return; st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
+  st.addEventListener('pointerdown',e=>{ if(e.target.closest('.editbox')||e.target.closest('.nodetb')||e.button===2) return;
+    // touch: no compatibility mousedown afterwards, so it can't move focus away from an editor opened by this tap (Android keyboard)
+    if(e.pointerType!=='mouse') e.preventDefault(); st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
     if(pts.size===2){ const [a,b]=[...pts.values()]; pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),c:[(a[0]+b[0])/2,(a[1]+b[1])/2]}; pan=null; drag=null; clearTimeout(lp); return; }
     const id=nodeAt(e), [x,y]=stagePoint(e);
     const relEl=!S.relPick&&!S.preview&&e.target.closest&&e.target.closest('g.rel');
@@ -224,7 +232,7 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
       else if(S.relPick){ relPickTo(d.id); }
       else if(d.link){ if(S.editing) commitEdit(); select(d.id,{scroll:false}); openDetails('link'); }
-      else { if(S.editing) commitEdit(); if(S.sel===d.id&&e.detail>=2) startEdit(d.id); else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
+      else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')) startEdit(d.id); /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
   st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); const rl=!id&&e.target.closest&&e.target.closest('g.rel'); if(rl){ e.preventDefault(); relClick(rl.dataset.rel,e.clientX,e.clientY); return; } if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
@@ -263,6 +271,7 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
   else if(c&&k==='0'){ e.preventDefault(); setField('pri',0); }
   else if(k==='Escape'){ e.preventDefault(); if(S.preview) return endPreview(); const b=$('.tb .tbtn'); (b&&b.offsetParent?b:$('.right-actions button:not([hidden])'))?.focus(); }
   else if(k==='?'){ e.preventDefault(); openDialog({type:'shortcuts'}); }
+  else if((e.keyCode===229||k==='Process'||e.isComposing)&&!c&&!e.altKey&&S.sel){ startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta) ta.value=''; } // IME (注音/拼音): open the editor and let the composition continue there — no preventDefault
   else if(/^[\p{L}\p{N}]$/u.test(k)&&!c&&!e.altKey&&S.sel){ // typing starts editing (GitMind habit)
     e.preventDefault(); startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta){ta.value=k;ta.setSelectionRange(1,1);} } }
 document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'), c=e.ctrlKey||e.metaKey;
@@ -605,6 +614,7 @@ async function act(a,v,el){ const f=selInfo();
   case 'undo': undo(); break; case 'redo': redo(); break;
   case 'addChild': closeMenu(); addChild(); break; case 'addSibling': closeMenu(); addSibling(); break; case 'outdent': closeMenu(); outdent(); break;
   case 'edit': closeMenu(); startEdit(S.sel); break;
+  case 'nodeMenuTb': { const r=el.getBoundingClientRect(); S.sel&&openNodeMenu(S.sel,r.left+r.width/2,r.bottom); if(MENU) MENU.trigger=el; break; }
   case 'delete': closeMenu(); removeSel(); $('#cv').focus(); break;
   case 'collapse': closeMenu(); toggleCollapse(); break;
   case 'copyNode': { closeMenu(); if(!f||!f.parent) return toast('中心主題不能複製'); const cp=ensureIds(JSON.parse(JSON.stringify(f.n).replace(/"id":"[^"]+",?/g,''))); mutate(r=>{find(r,f.parent.id).n.c.splice(f.idx+1,0,cp);},{select:cp.id}); break; }
