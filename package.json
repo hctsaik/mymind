@@ -1,0 +1,14 @@
+{
+  "name": "mymind",
+  "private": true,
+  "description": "MyMind 心智圖：純 HTML/CSS/JS，沒有建置步驟。package.json 只給測試用。",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 8765",
+    "test": "node tests/e2e.mjs",
+    "audit": "node tests/audit.mjs",
+    "check-secrets": "bash scripts/check-secrets.sh"
+  },
+  "devDependencies": { "playwright-core": "^1.65.1" }
+}

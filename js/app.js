@@ -1,0 +1,428 @@
+// MyMind app: state, routing, editor interactions, sync. Plain ES modules, no build step.
+import { I, esc, THEMES, DEFAULT_THEME, readable, lum, cr, mix } from './core.js';
+import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf } from './mapview.js';
+import { prefs, secrets, maps, newId } from './store.js';
+import { client, GitHubError } from './github.js';
+import { merge3, diffSummary } from './merge.js';
+import * as AI from './ai.js';
+import * as IO from './io.js';
+import * as V from './views.js';
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const P0=prefs.get();
+const S={view:'list',filter:'all',q:'',sideQ:'',sort:'updated',mapId:null,doc:null,sel:null,panel:'',tab:'theme',outline:false,
+  minimap:P0.minimap,hints:P0.hints,aibar:true,mode:P0.mode,repo:P0.repo,model:P0.model,lines:P0.lines,
+  sync:{state:'saved',at:null,msg:''},hist:{items:[],loading:false,error:''},preview:null,undo:[],redo:[],vp:null,dialog:null,editing:null};
+window.__mm=S; // for tests/debugging (contains no secrets)
+const ensureIds=n=>{if(!n.id)n.id=newId();(n.c||[]).forEach(ensureIds);return n;};
+const clone=o=>JSON.parse(JSON.stringify(o));
+function find(root,id,par=null,idx=0){ if(root.id===id) return {n:root,parent:par,idx}; for(let i=0;i<(root.c||[]).length;i++){const r=find(root.c[i],id,root,i); if(r) return r;} return null; }
+const th=()=>THEMES[(S.doc&&S.doc.theme)||DEFAULT_THEME]||THEMES[DEFAULT_THEME];
+const isM=V.isMobile;
+let toastT;
+function toast(msg,act){ let t=$('#toast'); if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t);}
+  t.innerHTML=`<span>${esc(msg)}</span>${act?`<button class="btn" data-act="${act[1]}">${esc(act[0])}</button>`:''}`; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),act?8000:3500); }
+// ---------- UI prefs ----------
+function applyUi(){ const p=prefs.get(); const dark=p.ui==='dark'||(p.ui==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.ui=dark?'dark':'light'; document.documentElement.classList.toggle('reduce-motion',!!p.reduceMotion); S.lines=p.lines; }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{applyUi();render();});
+// ---------- documents ----------
+function newDoc(root,theme=DEFAULT_THEME){ const now=new Date().toISOString(); const id=newId(); ensureIds(root);
+  return {format:'mymind/1',id,theme,settings:{},icon:'🧠',created:now,updated:now,root}; }
+function metaFrom(doc,extra={}){ return {title:doc.root.t,icon:doc.icon,theme:doc.theme,updated:doc.updated,created:doc.created,star:!!doc.star,trashed:!!doc.trashed,trashedAt:doc.trashedAt||null,...extra}; }
+function storeDoc(doc,{dirty=true}={}){ maps.save(doc.id,doc); maps.setMeta(doc.id,metaFrom(doc,dirty?{dirty:true}:{})); }
+function createMap(root,{open=true,theme}={}){ const doc=newDoc(root,theme); storeDoc(doc); if(S.mode==='github') schedulePush(doc.id,200); if(open) location.hash='#/map/'+doc.id; return doc; }
+// ---------- mutations / undo ----------
+function mutate(fn,{select,keepRedo}={}){ if(!S.doc||S.preview) return; S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>200)S.undo.shift(); if(!keepRedo)S.redo=[];
+  fn(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
+function touch(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=S.mode==='github'?'dirty':'saved'; if(S.mode==='github') schedulePush(S.doc.id); drawAll(); }
+function undo(){ if(!S.undo.length) return toast('沒有可以復原的動作'); S.redo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.undo.pop()); if(S.sel&&!find(S.doc.root,S.sel)) S.sel=S.doc.root.id; touch(); }
+function redo(){ if(!S.redo.length) return toast('沒有可以重做的動作'); S.undo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.redo.pop()); touch(); }
+const selInfo=()=>S.doc&&S.sel?find(S.doc.root,S.sel):null;
+function addChild(edit=true){ const f=selInfo()||{n:S.doc.root}; const n={id:newId(),t:'新主題'}; mutate(r=>{const x=find(r,f.n.id).n; x.c=x.c||[]; x.collapsed=false; x.c.push(n);},{select:n.id}); if(edit) startEdit(n.id,true); }
+function addSibling(edit=true){ const f=selInfo(); if(!f||!f.parent) return addChild(edit); const n={id:newId(),t:'新主題'}; mutate(r=>{const p=find(r,f.parent.id).n; p.c.splice(find(r,f.n.id).idx+1,0,n);},{select:n.id}); if(edit) startEdit(n.id,true); }
+function outdent(){ const f=selInfo(); if(!f||!f.parent) return; const gp=find(S.doc.root,f.parent.id); if(!gp.parent) return toast('第一層節點不能再升一層');
+  mutate(r=>{const a=find(r,f.n.id), p=find(r,f.parent.id); p.n.c.splice(a.idx,1); if(!p.n.c.length) delete p.n.c; p.parent.c.splice(p.idx+1,0,a.n);}); }
+function removeSel(){ const f=selInfo(); if(!f) return; if(!f.parent) return toast('中心主題不能刪除'); const next=(f.parent.c[f.idx+1]||f.parent.c[f.idx-1]||f.parent).id;
+  mutate(r=>{const a=find(r,f.n.id); a.parent.c.splice(a.idx,1); if(!a.parent.c.length) delete a.parent.c;},{select:next}); toast('已刪除「'+f.n.t+'」',['復原','undo']); }
+function moveNode(id,targetId,where){ if(id===targetId) return; const r0=S.doc.root, src=find(r0,id); if(!src||!src.parent) return; const tgt=find(r0,targetId); if(!tgt) return; if(find(src.n,targetId)) return toast('不能移到自己的子節點底下');
+  if(where!=='child'&&!tgt.parent) where='child';
+  mutate(r=>{const a=find(r,id); a.parent.c.splice(a.idx,1); if(!a.parent.c.length) delete a.parent.c; const t=find(r,targetId);
+    if(where==='child'){t.n.c=t.n.c||[]; t.n.collapsed=false; t.n.c.push(a.n);} else {const i=find(r,targetId).idx; t.parent.c.splice(where==='before'?i:i+1,0,a.n);}},{select:id}); }
+function reorder(dir){ const f=selInfo(); if(!f||!f.parent) return; const j=f.idx+dir; if(j<0||j>=f.parent.c.length) return; mutate(r=>{const p=find(r,f.parent.id).n; const [x]=p.c.splice(f.idx,1); p.c.splice(j,0,x);}); }
+function toggleCollapse(id){ const f=id?find(S.doc.root,id):selInfo(); if(!f||!f.n.c||!f.n.c.length) return; mutate(r=>{const x=find(r,f.n.id).n; x.collapsed=!x.collapsed;}); }
+function setLevel(l){ mutate(r=>{(function w(n,d){ if(n.c&&n.c.length){ n.collapsed=!!(l&&d>=l); n.c.forEach(c=>w(c,d+1)); } })(r,0);}); }
+function setField(k,v){ const f=selInfo(); if(!f) return toast('先選一個節點'); mutate(r=>{const x=find(r,f.n.id).n; if(v===undefined||v===''||v===0||v===false||v==='none') delete x[k]; else x[k]=v;}); }
+// ---------- routing ----------
+function route(){ const h=location.hash.replace(/^#\/?/,''); const [a,b]=h.split('/');
+  if(!S.mode){ S.view='welcome'; return render(); }
+  if(a==='map'&&b){ const d=maps.load(b); if(!d){ toast('找不到這張圖'); location.hash='#/'; return; } openDoc(d); return; }
+  S.view='list'; S.filter=['starred','recent','trash'].includes(a)?a:'all'; closeDoc(); render(); }
+function openDoc(d){ if(S.mapId!==d.id){ S.undo=[];S.redo=[];S.preview=null;S.vp=null;S.panel=S.panel==='history'?'':S.panel; S.sel=d.root.id; S.outline=false; }
+  S.view='editor'; S.mapId=d.id; S.doc=d; maps.setMeta(d.id,{opened:new Date().toISOString()}); const m=maps.meta(d.id); S.sync.state=m&&m.dirty&&S.mode==='github'?'dirty':'saved'; render(); }
+function closeDoc(){ S.doc=null; S.mapId=null; S.editing=null; }
+// ---------- rendering ----------
+let shellKey='';
+function render(){ applyUi(); const side=$('#side'), main=$('#main'); const app=$('#app');
+  if(S.view==='welcome'){ app.classList.add('nosidebar'); side.innerHTML=''; main.innerHTML=V.welcome(); shellKey=''; $('#skip').href='#content'; $('#skip').textContent='跳到內容'; drawDialog(); return; }
+  app.classList.remove('nosidebar'); side.innerHTML=V.sidebar(S,maps.index());
+  if(S.view==='list'){ shellKey=''; main.innerHTML=V.home(S,maps.index(),id=>maps.load(id)); $('#skip').href='#content'; $('#skip').textContent='跳到內容'; }
+  else if(S.view==='editor'){ $('#skip').href='#cv'; $('#skip').textContent='跳到畫布';
+    const key=[S.mapId,S.panel,S.outline,isM(),S.minimap,S.hints,S.aibar,!!S.preview].join('|');
+    if(key!==shellKey){ main.innerHTML=V.editorShell(S,S.doc,curName()); main.style.setProperty('--cv-main',th().canvas); shellKey=key; bindStage(); drawAll(true); }
+    else drawAll(); }
+  drawDialog(); }
+const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
+function drawChrome(){ if(S.view!=='editor') return; const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S);
+  const bp=$('.backpill'); if(bp){bp.querySelector('.cn').textContent=curName(); bp.setAttribute('aria-label','回到列表（目前節點：'+curName()+'）');}
+  $('#cv').style.setProperty('--cv',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas);
+  const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
+function drawPanel(){ const h=$('#panelHost'); if(!h) return; const f=selInfo();
+  const html=S.panel==='style'?V.stylePanel(S,S.doc,f&&f.n):S.panel==='history'?V.historyPanel(S):S.panel==='note'&&f?V.notePanel(f.n):'';
+  if(h.dataset.k===S.panel+'|'+S.sel&&S.panel==='note') return; // keep textarea focus while typing
+  const focusId=document.activeElement&&h.contains(document.activeElement)?document.activeElement.dataset.act+'|'+(document.activeElement.dataset.v||''):null;
+  h.innerHTML=html; h.dataset.k=S.panel+'|'+S.sel;
+  if(focusId){const [a,v]=focusId.split('|'); const el=h.querySelector(`[data-act="${a}"]${v?`[data-v="${CSS.escape(v)}"]`:''}`); if(el) el.focus();} }
+function drawAll(first){ if(S.view!=='editor'||!S.doc) return; drawChrome(); drawPanel();
+  const oh=$('#outlineHost'); if(oh) oh.innerHTML=S.outline?V.outlineView((S.preview?S.preview.doc:S.doc).root):'';
+  applyInsets(); drawMap(first); }
+function applyInsets(){ const cv=$('#cv'), st=$('#stage'); if(!cv) return; const R=cv.getBoundingClientRect(), ins={top:0,right:0,bottom:0,left:0}, G=8;
+  cv.querySelectorAll('[data-dock]').forEach(e=>{ e.getAnimations({subtree:true}).forEach(a=>a.finish()); const cs=getComputedStyle(e); if(cs.display==='none'||cs.visibility==='hidden') return; const r=e.getBoundingClientRect(); if(r.width<1||r.height<1) return;
+    const d=e.dataset.dock; if(d==='bottom') ins.bottom=Math.max(ins.bottom,R.bottom-r.top+G); else if(d==='right') ins.right=Math.max(ins.right,R.right-r.left+G); else if(d==='top') ins.top=Math.max(ins.top,r.bottom-R.top+G); else ins.left=Math.max(ins.left,r.right-R.left+G); });
+  if(isM()) ins.top=Math.max(ins.top,0);
+  st.style.inset=`${ins.top}px ${ins.right}px ${ins.bottom}px ${ins.left}px`; S.safe=ins; window.__SAFE=ins; }
+function laidOut(){ const doc=S.preview?S.preview.doc:S.doc; const r=layout(clone(doc.root),th(),doc.settings||{}); const by=new Map(); allDeep(r).forEach(n=>by.set(n.id,n)); return {r,by}; }
+function initialView(r){ const st=$('#stage'), W=st.clientWidth, H=st.clientHeight, m=isM(), b=bounds(r), PAD=m?16:28, big=all(r).length>120;
+  const L1=[r,...kids(r)], l1={x1:Math.max(...L1.map(n=>n.x+n.w/2)),y0:Math.min(...L1.map(n=>n.y-n.h/2)),y1:Math.max(...L1.map(n=>n.y+n.h/2))}; let sc,tx,ty;
+  if(big){ sc=m?Math.max(.5,Math.min(.72,(W-2*PAD)/(l1.x1-b.x0))):Math.max(.7,Math.min(1,(W-2*PAD)/b.w)); tx=PAD-b.x0*sc; ty=((S.doc.settings||{}).rootTop??th().rootTop)?PAD-b.y0*sc:H*.45-r.y*sc; }
+  else if(m){ sc=Math.max(.5,Math.min(1,(W-2*PAD)/(l1.x1-b.x0),(H-2*PAD)/(l1.y1-l1.y0))); tx=PAD-b.x0*sc; if(b.w*sc<=W-2*PAD) tx=W/2-(b.x0+b.w/2)*sc; ty=H/2-((l1.y0+l1.y1)/2)*sc; if(b.h*sc<=H-2*PAD) ty=H/2-(b.y0+b.h/2)*sc; }
+  else { sc=Math.min(1,(W-2*PAD)/b.w,(H-2*PAD)/b.h); sc=Math.max(sc,.35); tx=W/2-(b.x0+b.w/2)*sc; ty=H/2-(b.y0+b.h/2)*sc; if(b.h*sc>H-2*PAD) ty=H/2-r.y*sc; }
+  return {tx,ty,sc}; }
+let lay=null;
+function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const doc=S.preview?S.preview.doc:S.doc;
+  if(!S.vp||first&&!S.vp) S.vp=initialView(lay.r); if(first&&S.vpFor!==S.mapId){S.vp=initialView(lay.r);S.vpFor=S.mapId;}
+  const lod=S.vp.sc<.45&&all(lay.r).length>60;
+  const {svg,b}=renderMap(lay.r,th(),{sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod});
+  vp.innerHTML=svg; S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
+  $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
+function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; positionEditor(); updateMinimapVp(); }
+function drawOverview(lod){ const o=$('#ovl'); if(!o) return; o.querySelectorAll('.ovchip').forEach(e=>e.remove()); if(!lod) return; const T=th(), {tx,ty,sc}=S.vp;
+  all(lay.r).filter(n=>n.d<=1).forEach(n=>{const c=n.d===0?T.root:colorOf(n,T); let fg=n.d===0?T.rootText:'#1F2329'; let cc=c;
+    if(n.d===1&&cr('#FFFFFF',c)>=4.5) fg='#FFFFFF'; else if(n.d===1&&T.l1!=='tag'&&lum(c)<.3){ for(let t=0;cr('#FFFFFF',cc)<4.6&&t<=1;t+=.04) cc=mix(c,'#000000',t); fg='#FFFFFF'; }
+    if(n.d===1&&T.l1==='tag') fg='#3B2A20'; fg=readable(fg,cc,4.5);
+    o.insertAdjacentHTML('beforeend',`<span class="ovchip ${n.d===0?'r':''}" data-g="chip" style="left:${tx+(n.d===0?n.x+n.w/2:n.x-n.w/2)*sc}px;top:${ty+n.y*sc}px;background:${cc};color:${fg};box-shadow:inset 0 0 0 1.5px ${S.lines==='light'?cc:readable(cc,T.canvas,3)}">${esc(n.t)}</span>`);}); }
+function drawMinimap(svg,b){ const mm=$('#mmsvg'); if(!mm||!S.minimap||isM()) return; mm.setAttribute('viewBox',`${b.x0-30} ${b.y0-30} ${b.w+60} ${b.h+60}`); mm.innerHTML=svg; updateMinimapVp(); }
+function updateMinimapVp(){ const mm=document.querySelector('.minimap'), vp=$('#mmvp'), st=$('#stage'); if(!mm||!vp||!S.bounds||!mm.clientWidth) return; const b=S.bounds, vbx=b.x0-30,vby=b.y0-30,vbw=b.w+60,vbh=b.h+60, MW=mm.clientWidth,MH=mm.clientHeight,k=Math.min(MW/vbw,MH/vbh),ox=(MW-vbw*k)/2,oy=(MH-vbh*k)/2, {tx,ty,sc}=S.vp;
+  let L=ox+(-tx/sc-vbx)*k,T=oy+(-ty/sc-vby)*k,R=L+st.clientWidth/sc*k,B=T+st.clientHeight/sc*k; L=Math.max(2,L);T=Math.max(2,T);R=Math.min(MW-2,R);B=Math.min(MH-2,B); Object.assign(vp.style,{left:L+'px',top:T+'px',width:Math.max(8,R-L)+'px',height:Math.max(8,B-T)+'px'}); }
+let zoomT;
+function zoomAt(f,cx,cy){ const st=$('#stage'); if(cx===undefined){cx=st.clientWidth/2;cy=st.clientHeight/2;} const v=S.vp, ns=Math.max(.15,Math.min(3,v.sc*f)), k=ns/v.sc;
+  S.vp={sc:ns,tx:cx-(cx-v.tx)*k,ty:cy-(cy-v.ty)*k}; applyVp(); clearTimeout(zoomT); zoomT=setTimeout(()=>drawMap(),140); }
+function fit(){ const r=lay.r, st=$('#stage'), b=bounds(r), PAD=isM()?16:28; const sc=Math.max(.15,Math.min(1.2,(st.clientWidth-2*PAD)/b.w,(st.clientHeight-2*PAD)/b.h)); S.vp={sc,tx:st.clientWidth/2-(b.x0+b.w/2)*sc,ty:st.clientHeight/2-(b.y0+b.h/2)*sc}; drawMap(); }
+function ensureVisible(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) return; const {tx,ty,sc}=S.vp, x0=tx+(n.x-n.w/2)*sc, x1=tx+(n.x+n.w/2+40)*sc, y0=ty+(n.y-n.h/2)*sc, y1=ty+(n.y+n.h/2)*sc, W=st.clientWidth, H=st.clientHeight, M=24; let dx=0,dy=0;
+  if(x1>W-M) dx=W-M-x1; if(x0+dx<M) dx=M-x0; if(y1>H-M) dy=H-M-y1; if(y0+dy<M) dy=M-y0; if(dx||dy){S.vp={...S.vp,tx:tx+dx,ty:ty+dy}; applyVp();} }
+function select(id,{scroll=true}={}){ S.sel=id; drawAll(); if(scroll) ensureVisible(id); }
+// ---------- inline edit ----------
+function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
+  S.editing={id,isNew,orig:find(S.doc.root,id).n.t}; ensureVisible(id); const o=$('#ovl'); o.querySelector('.editbox')?.remove();
+  const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; o.appendChild(ta); positionEditor(); ta.focus(); ta.select();
+  ta.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.isComposing||e.keyCode===229) return;
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();commitEdit();$('#cv').focus();}
+    else if(e.key==='Escape'){e.preventDefault();cancelEdit();}
+    else if(e.key==='Tab'){e.preventDefault();commitEdit();if(e.shiftKey)outdent();else addChild();} });
+  ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';});
+  ta.addEventListener('blur',()=>setTimeout(()=>{ if(S.editing&&S.editing.id===id&&document.activeElement!==ta) commitEdit(); },0)); }
+function positionEditor(){ const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
+  const fs=n.d===0?22:n.d===1?16:14; Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
+function commitEdit(){ const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; ta.remove();
+  if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); }
+function cancelEdit(){ const ta=document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; ta&&ta.remove(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
+// ---------- stage pointer handling ----------
+function nodeAt(e){ let t=e.target; if(t&&t.id==='stage'||t&&t.closest&&!t.closest('#mapsvg')){ const h=document.elementFromPoint(e.clientX,e.clientY); if(h) t=h; } const g=t&&t.closest&&t.closest('g.node'); return g?g.dataset.id:null; }
+function stagePoint(e){ const r=$('#stage').getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
+function worldAt(x,y){ const {tx,ty,sc}=S.vp; return [(x-tx)/sc,(y-ty)/sc]; }
+function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map(); let pan=null, drag=null, pinch=null, lp=null;
+  st.addEventListener('pointerdown',e=>{ if(e.target.closest('.editbox')||e.button===2) return; st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
+    if(pts.size===2){ const [a,b]=[...pts.values()]; pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),c:[(a[0]+b[0])/2,(a[1]+b[1])/2]}; pan=null; drag=null; clearTimeout(lp); return; }
+    const id=nodeAt(e), [x,y]=stagePoint(e);
+    if(e.target.closest('.handle')){ e.preventDefault(); addChild(); return; }
+    if(e.target.closest('.cc')){ e.preventDefault(); toggleCollapse(id); return; }
+    if(id){ drag={id,x0:x,y0:y,moved:false}; if(e.pointerType!=='mouse') lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); } },520); }
+    else pan={x0:x,y0:y,tx:S.vp.tx,ty:S.vp.ty,moved:false}; });
+  st.addEventListener('pointermove',e=>{ if(!pts.has(e.pointerId)) return; pts.set(e.pointerId,stagePoint(e)); const [x,y]=stagePoint(e);
+    if(pinch&&pts.size===2){ const [a,b]=[...pts.values()]; const d=Math.hypot(a[0]-b[0],a[1]-b[1]); const c=[(a[0]+b[0])/2,(a[1]+b[1])/2]; const f=d/pinch.d; const v=S.vp, ns=Math.max(.15,Math.min(3,v.sc*f)), k=ns/v.sc; S.vp={sc:ns,tx:c[0]-(pinch.c[0]-v.tx)*k,ty:c[1]-(pinch.c[1]-v.ty)*k}; pinch={d,c}; applyVp(); return; }
+    if(pan){ if(Math.hypot(x-pan.x0,y-pan.y0)>3) pan.moved=true; S.vp={...S.vp,tx:pan.tx+x-pan.x0,ty:pan.ty+y-pan.y0}; applyVp(); }
+    else if(drag){ if(!drag.moved&&Math.hypot(x-drag.x0,y-drag.y0)>6){ drag.moved=true; clearTimeout(lp); if(drag.id===S.doc.root.id||S.preview){drag=null;return;} st.classList.add('dragging'); }
+      if(drag&&drag.moved){ const [wx,wy]=worldAt(x,y); let t=null; for(const n of lay.by.values()){ if(n.id!==drag.id&&n.x!==undefined&&Math.abs(wx-n.x)<=n.w/2+6&&Math.abs(wy-n.y)<=n.h/2+6){t=n;break;} }
+        const where=t?(wy<t.y-t.h/4&&t.d>0?'before':wy>t.y+t.h/4&&t.d>0?'after':'child'):null; drag.t=t&&t.id; drag.where=where; if(S.drop!==drag.t){S.drop=drag.t; drawMap();} showGhost(x,y,drag); } } });
+  const end=e=>{ if(!pts.has(e.pointerId)) return; pts.delete(e.pointerId); clearTimeout(lp); if(pts.size<2&&pinch){ pinch=null; drawMap(); return; }
+    if(pan){ if(!pan.moved&&!e.target.closest('g.node')){ /* click on empty canvas */ } if(pan.moved) drawMap(); pan=null; }
+    else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
+      else { if(S.editing) commitEdit(); if(S.sel===d.id&&e.detail>=2) startEdit(d.id); else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
+  st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
+  st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
+  st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
+  st.addEventListener('wheel',e=>{ e.preventDefault(); const [x,y]=stagePoint(e); if(e.ctrlKey||e.metaKey) zoomAt(Math.exp(-e.deltaY*.01),x,y); else { S.vp={...S.vp,tx:S.vp.tx-(e.shiftKey?e.deltaY:e.deltaX),ty:S.vp.ty-(e.shiftKey?0:e.deltaY)}; applyVp(); } },{passive:false});
+  const ai=$('#aibar'); if(ai){ const q=$('#aiq'), sb=ai.querySelector('.send'); q.addEventListener('input',()=>sb.disabled=!q.value.trim()); ai.addEventListener('submit',e=>{e.preventDefault(); if(q.value.trim()) aiFromBar(q.value.trim());}); } }
+function showGhost(x,y,d){ let g=$('#ghost'); const n=lay.by.get(d.id); if(!g){g=document.createElement('div');g.id='ghost';g.className='dragghost';$('#ovl').appendChild(g);} g.textContent=(n?n.t:'')+(d.t?(d.where==='child'?' → 成為子節點':d.where==='before'?' → 放到上方':' → 放到下方'):''); g.style.left=(x+14)+'px'; g.style.top=(y+10)+'px'; }
+function hideGhost(){ $('#ghost')?.remove(); }
+// ---------- keyboard ----------
+function navigate(key){ const f=selInfo(); if(!f) return select(S.doc.root.id); const n=lay.by.get(f.n.id);
+  if(key==='ArrowLeft'&&f.parent) return select(f.parent.id);
+  if(key==='ArrowRight'){ if(f.n.collapsed) toggleCollapse(f.n.id); const k=kids(n); if(k.length){ const near=[...k].sort((a,b)=>Math.abs(a.y-n.y)-Math.abs(b.y-n.y))[0]; return select(near.id);} return; }
+  if(key==='ArrowUp'||key==='ArrowDown'){ // visual neighbour in the same column first, else sibling
+    if(f.parent){ const j=f.idx+(key==='ArrowUp'?-1:1); if(j>=0&&j<f.parent.c.length) return select(f.parent.c[j].id); }
+    const cand=[...lay.by.values()].filter(m=>m.x!==undefined&&m.d===n.d&&(key==='ArrowUp'?m.y<n.y:m.y>n.y)).sort((a,b)=>Math.abs(a.y-n.y)-Math.abs(b.y-n.y)); if(cand[0]) select(cand[0].id); } }
+function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c=e.ctrlKey||e.metaKey;
+  if(S.preview&&!['Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) return;
+  if(k==='Tab'&&!c&&!e.altKey){ e.preventDefault(); e.shiftKey?outdent():addChild(); }
+  else if(k==='Enter'&&!c){ e.preventDefault(); e.shiftKey?startEdit(S.sel):addSibling(); }
+  else if(k===' '||k==='F2'){ e.preventDefault(); startEdit(S.sel||S.doc.root.id); }
+  else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); removeSel(); }
+  else if(k.startsWith('Arrow')&&e.altKey){ e.preventDefault(); if(k==='ArrowUp')reorder(-1); else if(k==='ArrowDown')reorder(1); }
+  else if(k.startsWith('Arrow')){ e.preventDefault(); navigate(k); }
+  else if(c&&k==='.'){ e.preventDefault(); toggleCollapse(); }
+  else if(c&&/^[1-5]$/.test(k)){ e.preventDefault(); const f=selInfo(); setField('pri',f&&f.n.pri===+k?0:+k); }
+  else if(c&&k==='0'){ e.preventDefault(); setField('pri',0); }
+  else if(k==='Escape'){ e.preventDefault(); if(S.preview) return endPreview(); const b=$('.tb .tbtn'); (b&&b.offsetParent?b:$('.right-actions button:not([hidden])'))?.focus(); }
+  else if(k==='?'){ e.preventDefault(); openDialog({type:'shortcuts'}); }
+  else if(/^[\p{L}\p{N}]$/u.test(k)&&!c&&!e.altKey&&S.sel){ // typing starts editing (GitMind habit)
+    e.preventDefault(); startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta){ta.value=k;ta.setSelectionRange(1,1);} } }
+document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'), c=e.ctrlKey||e.metaKey;
+  if(e.key==='Escape'&&closeMenu(true)) { e.preventDefault(); return; }
+  if(S.dialog){ if(e.key==='Escape'){ e.preventDefault(); closeDialog(); } else if(e.key==='Tab') trapFocus(e); return; }
+  if(c&&e.key.toLowerCase()==='s'){ e.preventDefault(); if(S.doc) pushNow(S.doc.id); return; }
+  if(e.altKey&&e.key==='0'){ e.preventDefault(); $('#cv')?.focus(); return; }
+  if(typing) { if(e.key==='Escape'&&S.panel&&t.closest('#panelHost')){ e.preventDefault(); closePanel(); } return; }
+  if(c&&!e.shiftKey&&e.key.toLowerCase()==='z'){ if(S.doc){e.preventDefault();undo();} return; }
+  if(c&&(e.key.toLowerCase()==='y'||(e.shiftKey&&e.key.toLowerCase()==='z'))){ if(S.doc){e.preventDefault();redo();} return; }
+  if(c&&e.key.toLowerCase()==='o'&&S.doc){ e.preventDefault(); act('outline'); return; }
+  if(c&&e.altKey&&e.key.toLowerCase()==='m'&&S.doc){ e.preventDefault(); act('note'); return; }
+  if(c&&e.key.toLowerCase()==='j'&&S.doc){ e.preventDefault(); act('aiExpand'); return; }
+  if(e.altKey&&e.key.toLowerCase()==='y'&&S.doc){ e.preventDefault(); act('style'); return; }
+  if(e.key==='F6'&&S.doc&&!isM()){ e.preventDefault(); act('randomTheme'); return; }
+  if(e.key==='/'&&!c){ const s=$('#homeq')||$('#sideq'); if(s){e.preventDefault();s.focus();} return; }
+  if(t.closest&&t.closest('#cv')&&!t.closest('#panelHost')&&!t.closest('.zoom')&&!t.closest('.cbar')) canvasKey(e);
+  else if(e.key==='Escape'&&S.panel){ closePanel(); } });
+// ---------- menus (WAI-ARIA menu pattern: focus first item, arrows move, Esc returns focus) ----------
+let MENU=null;
+function openMenu(html,trigger,pos){ closeMenu(); const L=$('#layer'); L.insertAdjacentHTML('beforeend',`<div class="mscrim menuscrim" data-act="closeMenu"></div>`+html); const m=L.lastElementChild; MENU={el:m,trigger};
+  if(trigger) trigger.setAttribute('aria-expanded','true');
+  const W=innerWidth,H=innerHeight, r=m.getBoundingClientRect(); let x=pos.x, y=pos.y; if(pos.alignRight) x=pos.x-r.width; x=Math.max(8,Math.min(W-r.width-8,x)); if(y+r.height>H-8) y=Math.max(8,(pos.yAbove??H)-r.height-8); m.style.left=x+'px'; m.style.top=y+'px';
+  const items=()=>[...m.querySelectorAll('[role=menuitem],[role=menuitemradio]')].filter(x=>!x.disabled);
+  items()[0]?.focus();
+  m.addEventListener('keydown',e=>{ const it=items(), i=it.indexOf(document.activeElement);
+    if(e.key==='ArrowDown'||e.key==='ArrowRight'&&m.classList.contains('lpmenu')){e.preventDefault();it[(i+1)%it.length].focus();}
+    else if(e.key==='ArrowUp'||e.key==='ArrowLeft'&&m.classList.contains('lpmenu')){e.preventDefault();it[(i-1+it.length)%it.length].focus();}
+    else if(e.key==='Home'){e.preventDefault();it[0].focus();} else if(e.key==='End'){e.preventDefault();it[it.length-1].focus();}
+    else if(e.key==='Tab'){e.preventDefault();closeMenu(true);} }); }
+function closeMenu(restore){ if(!MENU) return false; const {el,trigger}=MENU; MENU=null; el.remove(); $('#layer .menuscrim')?.remove(); if(trigger){trigger.setAttribute('aria-expanded','false'); if(restore&&document.contains(trigger)) trigger.focus();} return true; }
+const mi=(act,icon,label,cls='',v='')=>`<button role="menuitem" tabindex="-1" data-act="${act}"${v!==''?` data-v="${esc(v)}"`:''}${cls?` class="${cls}"`:''}>${I(icon)}<span>${label}</span></button>`;
+function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','備註'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製'],['collapse','minus',n.collapsed?'展開':'收合'],['aiExpand','spark','AI 擴充'],['delete','trash','刪除','del']];
+  openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c])=>mi(a,i,l,c||'')).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
+function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
+  openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">
+  <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
+  <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
+  <hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('import','upload','匯入 Markdown／OPML 大綱')}
+  <hr>${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：GitHub 與 AI 金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
+function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientRect();
+  openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('exp','outline','Markdown 大綱','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
+function openCardMenu(id,trigger){ const m=maps.meta(id), r=trigger.getBoundingClientRect();
+  const html=m.trashed?`${mi('restoreMap','undo','還原','',id)}<hr>${mi('purgeMap','trash','永久刪除','del',id)}`:`${mi('openMap','ext','開啟','',id)}${mi('renameMap','edit','重新命名','',id)}${mi('dupMap','copy','建立副本','',id)}${mi('starMap','star',m.star?'移除星號':'加星號','',id)}${mi('expMapMd','download','匯出 Markdown','',id)}<hr>${mi('trashMap','trash','移到垃圾桶','del',id)}`;
+  openMenu(`<div class="ctx" role="menu" aria-label="${esc(m.title)} 的動作">${html}</div>`,trigger,{x:r.right,y:r.bottom+4,alignRight:true}); }
+function openPriMenu(){ const r=$('#cv').getBoundingClientRect(); openMenu(`<div class="ctx" role="menu" aria-label="優先順序">${[1,2,3,4,5].map(n=>mi('pri','alert','優先順序 '+n,'',n)).join('')}${mi('pri','x','清除','',0)}</div>`,$('#cv'),{x:r.left+r.width/2-110,y:r.top+80}); }
+// ---------- dialogs ----------
+let lastFocus=null;
+function openDialog(D){ if(!S.dialog) lastFocus=document.activeElement; S.dialog=D; drawDialog(true); }
+function closeDialog(){ if(!S.dialog) return; if(S.dialog.type==='ai'&&S.dialog.ctrl) S.dialog.ctrl.abort(); const D=S.dialog; S.dialog=null; drawDialog(); if(D.onClose) D.onClose(); if(lastFocus&&document.contains(lastFocus)) lastFocus.focus(); }
+function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove(); const D=S.dialog; if(!D) return; let html='';
+  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,D.tab==='expand'&&S.doc?(selInfo()||{n:S.doc.root}).n:null); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D);
+  const w=document.createElement('div'); w.className='dlg'; w.innerHTML=html; L.appendChild(w);
+  if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
+function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
+  if(e.shiftKey&&document.activeElement===a){e.preventDefault();z.focus();} else if(!e.shiftKey&&document.activeElement===z){e.preventDefault();a.focus();} }
+function openSettings(tab='gh'){ const p=prefs.get(); openDialog({type:'settings',tab,repoBefore:p.repo,form:{repo:p.repo,pat:secrets.pat(),openai:secrets.openai(),model:p.model,lines:p.lines,ui:p.ui,reduceMotion:p.reduceMotion}}); }
+function askText(title,label,value,ok){ return new Promise(res=>openDialog({type:'prompt',title,label,input:value,ok:'確定',focus:'#pr-in',resolve:res,onClose:()=>res(null)})); }
+function confirmBox(title,sub,ok,danger){ return new Promise(res=>openDialog({type:'prompt',title,sub,ok,danger,resolve:res,onClose:()=>res(null)})); }
+// ---------- AI ----------
+function openAI(tab='topic',extra={}){ openDialog({type:'ai',tab,topic:'',notes:'',hint:'',depth:3,breadth:'4–6',...extra}); }
+async function runAI(){ const D=S.dialog; if(!D||D.type!=='ai'||D.busy) return; const key=secrets.openai(); const model=prefs.get().model;
+  ['topic','notes','hint'].forEach(k=>{const el=document.querySelector(`[data-ai="${k}"]`); if(el) D[k]=el.value;});
+  if(!key){ D.error={kind:'nokey'}; return drawDialog(); }
+  const f=S.doc?(selInfo()||{n:S.doc.root}):null;
+  if(D.tab==='expand'&&!f){ D.error={kind:'http',message:'先開一張圖並選一個節點'}; return drawDialog(); }
+  if(D.tab==='topic'&&!D.topic.trim()||D.tab==='notes'&&!D.notes.trim()){ toast('請先輸入內容'); return; }
+  D.busy=true; D.error=null; D.ctrl=new AbortController(); drawDialog();
+  try{ let tree;
+    if(D.tab==='expand'){ const path=[]; let x=find(S.doc.root,f.n.id); while(x){path.unshift(x.n.t); x=x.parent?find(S.doc.root,x.parent.id):null;}
+      tree=await AI.expand(key,model,{path,node:f.n.t,hint:D.hint},{signal:D.ctrl.signal}); const add=(tree.c||[]).map(c=>ensureIds(clone(c)));
+      S.dialog=null; drawDialog(); mutate(r=>{const n=find(r,f.n.id).n; n.c=(n.c||[]).concat(add); n.collapsed=false;}); toast(`已新增 ${add.length} 個子主題`,['復原','undo']); }
+    else { tree=await AI.generate(key,model,{topic:D.topic,notes:D.tab==='notes'?D.notes:'',depth:D.depth,breadth:D.breadth},{signal:D.ctrl.signal}); S.dialog=null; drawDialog(); const d=createMap(tree); d.icon='✨'; storeDoc(d); toast('已產生新圖「'+tree.t+'」'); }
+  }catch(e){ if(e.name==='AbortError'){ D.busy=false; return drawDialog(); } D.busy=false; D.error={kind:e.kind||'http',message:e.message}; if(S.dialog===D) drawDialog(); else openDialog(D); } }
+function aiFromBar(text){ const f=S.doc&&(selInfo()||{n:S.doc.root}); openAI('expand',{hint:text}); runAI(); const q=$('#aiq'); if(q){q.value='';q.dispatchEvent(new Event('input'));} }
+// ---------- sync with GitHub ----------
+const gh=()=>{ const t=secrets.pat(); return S.mode==='github'&&t?client(t,S.repo):null; };
+const pathOf=id=>`maps/${id}.json`;
+const pushT=new Map();
+function schedulePush(id,ms=3000){ clearTimeout(pushT.get(id)); pushT.set(id,setTimeout(()=>pushNow(id),ms)); }
+function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='saved'?new Date().toISOString():S.sync.at}; drawChrome(); }
+async function pushNow(id){ clearTimeout(pushT.get(id)); const c=gh(); if(!c){ if(S.mode==='github') setSync('error','還沒設定金鑰'); return; }
+  const doc=maps.load(id), meta=maps.meta(id); if(!doc||!meta) return;
+  if(!navigator.onLine){ setSync('offline'); return; }
+  const isCur=S.doc&&S.doc.id===id; if(isCur) setSync('saving');
+  try{ const text=JSON.stringify(doc,null,1)+'\n'; const r=await c.put(pathOf(id),text,meta.sha,`${meta.sha?'更新':'建立'}「${doc.root.t}」`);
+    const latest=maps.load(id); maps.setMeta(id,{sha:r.sha,remote:true,dirty:JSON.stringify(latest)!==JSON.stringify(doc)}); maps.saveBase(id,doc);
+    if(isCur) setSync(maps.meta(id).dirty?'dirty':'saved'); if(maps.meta(id).dirty) schedulePush(id); else if(!isCur) drawChrome();
+  }catch(e){ await onPushError(id,e,isCur); } }
+async function onPushError(id,e,isCur){
+  if(e.status===409||e.status===422&&/sha/i.test(e.message)||e.status===422&&/does not match/i.test(e.message)){ return openConflict(id); }
+  if(e.status===0){ if(isCur) setSync('offline'); return; }
+  const msg=e.status===401?'金鑰無效或過期（401）':e.status===403?'金鑰沒有寫入權限（403）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message; if(isCur) setSync('error',msg); else toast('同步失敗：'+msg); }
+async function openConflict(id){ const c=gh(); let remote; try{ remote=await c.get(pathOf(id)); }catch(e){ return setSync('error',e.message); }
+  const theirs=JSON.parse(remote.text), mine=maps.load(id), base=maps.base(id)||theirs; const T=THEMES[mine.theme]||THEMES[DEFAULT_THEME];
+  const svgOf=d=>{const r=layout(clone(d.root),T,d.settings||{});const {svg,b}=renderMap(r,T,{thumb:true});return `<svg viewBox="${b.x0-20} ${b.y0-20} ${b.w+40} ${b.h+40}" aria-hidden="true">${svg}</svg>`;};
+  let when=''; try{ const cm=await c.commits(pathOf(id)); when=cm[0]?V.rel(cm[0].date):''; }catch{}
+  openDialog({type:'conflict',id,pick:'merge',title:mine.root.t,canvas:T.canvas,sha:remote.sha,remoteSha:remote.sha,theirs,mine,base,when,mineDiff:diffSummary(base,mine),theirsDiff:diffSummary(base,theirs),mineSvg:svgOf(mine),theirsSvg:svgOf(theirs)}); setSync('error','雲端有比較新的版本'); }
+async function applyConflict(){ const D=S.dialog; const {id,pick,theirs,mine,base,remoteSha}=D; S.dialog=null; drawDialog();
+  if(pick==='theirs'){ const copy={...clone(mine),id:newId(),root:{...clone(mine.root)}}; copy.root.t=mine.root.t+'（我的副本）'; storeDoc(copy); schedulePush(copy.id,500);
+    maps.save(id,theirs); maps.saveBase(id,theirs); maps.setMeta(id,{...metaFrom(theirs),sha:remoteSha,dirty:false}); if(S.mapId===id){S.doc=theirs;S.undo=[];} toast('已改用雲端版本；你的修改另存成副本'); }
+  else { let doc=mine; if(pick==='merge'){ const r=merge3(base,mine,theirs); doc=r.doc; if(r.conflicts) toast(`已合併；${r.conflicts} 處兩邊都改，保留了你的版本`); else toast('已自動合併兩邊的修改'); }
+    maps.save(id,doc); maps.setMeta(id,{...metaFrom(doc),sha:remoteSha,dirty:true}); if(S.mapId===id) S.doc=doc; await pushNow(id); }
+  render(); }
+let syncing=false;
+async function syncAll(){ const c=gh(); if(!c||syncing) return; syncing=true;
+  try{ const files=(await c.list('maps')).filter(f=>f.name.endsWith('.json')); const remoteIds=new Set();
+    for(const f of files){ const id=f.name.replace(/\.json$/,''); remoteIds.add(id); const m=maps.meta(id);
+      if(m&&m.sha===f.sha) continue;
+      if(m&&m.dirty&&m.sha){ continue; } // our push will detect the conflict
+      const r=await c.get(f.path); let d; try{ d=JSON.parse(r.text); }catch{ continue; } if(!d||!d.root) continue; d.id=id; ensureIds(d.root);
+      maps.save(id,d); maps.saveBase(id,d); maps.setMeta(id,{...metaFrom(d),sha:r.sha,remote:true,dirty:false}); if(S.mapId===id&&!S.editing){ S.doc=d; } }
+    for(const m of maps.index()){ if(m.remote&&!remoteIds.has(m.id)&&!m.dirty){ maps.remove(m.id); if(S.mapId===m.id){ location.hash='#/'; } } else if(!m.remote||m.dirty){ if(!remoteIds.has(m.id)) maps.setMeta(m.id,{sha:null}); schedulePush(m.id,300); } }
+    if(S.sync.state!=='dirty'&&S.sync.state!=='saving') setSync('saved'); render();
+  }catch(e){ if(e.status===0) setSync('offline'); else setSync('error',e.status===401?'金鑰無效或過期（401）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message); render(); }
+  finally{ syncing=false; } }
+addEventListener('online',()=>{ if(S.mode==='github'){ syncAll(); maps.index().filter(m=>m.dirty).forEach(m=>schedulePush(m.id,500)); } });
+addEventListener('offline',()=>{ if(S.mode==='github') setSync('offline'); });
+setInterval(()=>{ if(S.mode==='github'&&document.visibilityState==='visible') syncAll(); },60000);
+// history
+async function loadHistory(){ const c=gh(); S.hist={items:[],loading:!!c,error:''}; drawPanel(); if(!c) return; try{ S.hist.items=await c.commits(pathOf(S.mapId)); }catch(e){ S.hist.error=e.status===404?'找不到紀錄':e.message; } S.hist.loading=false; drawPanel(); }
+async function preview(sha){ const c=gh(); try{ const r=await c.get(pathOf(S.mapId),sha); const d=JSON.parse(r.text); const it=S.hist.items.find(i=>i.sha===sha); S.preview={sha,doc:d,label:it?V.rel(it.date):sha.slice(0,7)}; S.vpFor=null; render(); }catch(e){ toast('讀取版本失敗：'+e.message); } }
+function endPreview(){ S.preview=null; render(); }
+function restorePreview(){ const d=S.preview.doc, label=S.preview.label; S.preview=null; render(); mutate(r=>{ r.t=d.root.t; r.c=clone(d.root.c||[]); FIELDS_ROOT.forEach(k=>{ if(d.root[k]!==undefined) r[k]=d.root[k]; else delete r[k]; }); }); S.doc.theme=d.theme||S.doc.theme; S.doc.settings=d.settings||{}; storeDoc(S.doc); toast('已還原到 '+label+'，儲存後會新增一個版本'); }
+const FIELDS_ROOT=['note','icon','pri','hl','collapsed'];
+// ---------- import / export ----------
+function pickFile(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.md,.markdown,.txt,.opml,.xml,.json'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; const text=await f.text();
+  try{ let root; if(/\.(opml|xml)$/i.test(f.name)||/^\s*<\?xml|<opml/i.test(text)) root=IO.fromOPML(text); else if(/\.json$/i.test(f.name)){ const d=JSON.parse(text); root=ensureIds(d.root||d); } else root=IO.fromMarkdown(text);
+    const d=createMap(root); toast(`已匯入「${root.t}」，共 ${allDeep(root).length} 個節點`); }catch(e){ toast('匯入失敗：'+e.message); } }; inp.click(); }
+async function exportAs(kind,doc=S.doc){ const name=(doc.root.t||'mymind').replace(/[\\/:*?"<>|]/g,'_');
+  if(kind==='md') return IO.download(name+'.md',IO.toMarkdown(doc.root),'text/markdown');
+  if(kind==='opml') return IO.download(name+'.opml',IO.toOPML(doc.root),'text/xml');
+  if(kind==='json') return IO.download(name+'.mymind.json',JSON.stringify(doc,null,1),'application/json');
+  const T=THEMES[doc.theme]||THEMES[DEFAULT_THEME]; const r=layout(clone(doc.root),T,doc.settings||{}); const {svg,b}=renderMap(r,T,{lightLines:S.lines==='light',edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw});
+  const s=IO.svgString(svg,b,T.canvas); if(kind==='svg') return IO.download(name+'.svg',s.s,'image/svg+xml');
+  try{ IO.download(name+'.png',await IO.toPNG(s.s,s.w,s.h,2)); }catch(e){ toast(e.message); } }
+// ---------- actions ----------
+function closePanel(){ const was=S.panel; S.panel=''; render(); const b=was==='style'?$('[data-act="style"]'):was==='history'?$('[data-act="history"]'):null; (b&&b.offsetParent?b:$('#cv'))?.focus(); }
+async function act(a,v,el){ const f=selInfo();
+  switch(a){
+  case 'home': location.hash='#/'; break;
+  case 'new': { createMap({t:'中心主題',c:[{t:'主題 1'},{t:'主題 2'},{t:'主題 3'}]}); setTimeout(()=>{ if(S.doc){S.sel=S.doc.root.id; drawAll(); startEdit(S.doc.root.id);} },60); break; }
+  case 'nav': document.body.insertAdjacentHTML('beforeend',`<div class="navdrawer" role="dialog" aria-modal="true" aria-label="選單"><div class="scrim2" data-act="navClose"></div><aside class="side">${V.sidebar(S,maps.index())}</aside></div>`); $('.navdrawer .new-btn').focus(); break;
+  case 'navClose': $('.navdrawer')?.remove(); break;
+  case 'settings': closeMenu(); if(S.dialog) S.dialog=null; openSettings('gh'); break;
+  case 'settingsA11y': closeMenu(); openSettings('a11y'); break;
+  case 'welcomeGithub': openSettings('gh'); break;
+  case 'welcomeLocal': prefs.set({mode:'local'}); S.mode='local'; location.hash='#/'; route(); break;
+  case 'closeDialog': closeDialog(); break;
+  case 'scrim': if(el===event.target) closeDialog(); break;
+  case 'setTab': if(S.dialog.form) readForm(S.dialog); S.dialog.tab=v; drawDialog(); $(`#st-${v}`)?.focus(); break;
+  case 'formLines': readForm(S.dialog); S.dialog.form.lines=v; prefs.set({lines:v}); applyUi(); drawDialog(); $(`[data-act="formLines"][data-v="${v}"]`)?.focus(); if(S.doc) drawMap(); break;
+  case 'formUi': readForm(S.dialog); S.dialog.form.ui=v; prefs.set({ui:v}); applyUi(); drawDialog(); $(`[data-act="formUi"][data-v="${v}"]`)?.focus(); render(); break;
+  case 'formMotion': readForm(S.dialog); S.dialog.form.reduceMotion=!S.dialog.form.reduceMotion; prefs.set({reduceMotion:S.dialog.form.reduceMotion}); applyUi(); drawDialog(); $('[data-act="formMotion"]')?.focus(); break;
+  case 'testGithub': { const D=S.dialog; readForm(D); if(!D.form.pat||!D.form.repo){D.test={ok:false,msg:'請填寫儲存庫和金鑰'};return drawDialog();} D.test={ok:true,msg:'測試中…'}; drawDialog();
+    try{ const c=client(D.form.pat.trim(),D.form.repo.trim()); const t=await c.test(); let canWrite=t.push; D.test=canWrite?{ok:true,msg:`連線成功 · ${t.private?'私人儲存庫':'⚠ 這是公開儲存庫'} · 可讀寫`}:{ok:false,msg:'可以讀取但沒有寫入權限：請把 Contents 設成 Read and write'}; }
+    catch(e){ D.test={ok:false,msg:e.status===401?'金鑰無效或過期（401）':e.status===404?'找不到儲存庫：確認名稱，並確認金鑰有勾選 mymind-data（404）':e.status===0?'網路連線失敗':e.message}; }
+    if(S.dialog===D) drawDialog(); break; }
+  case 'saveSettings': { const D=S.dialog; readForm(D); const p={repo:D.form.repo.trim()||'hctsaik/mymind-data',model:D.form.model.trim()||'gpt-4o-mini'}; secrets.setPat(D.form.pat.trim()); secrets.setOpenai(D.form.openai.trim());
+    const wasMode=S.mode; if(D.form.pat.trim()){ p.mode='github'; } else if(!S.mode) p.mode='local'; prefs.set(p); Object.assign(S,{repo:p.repo,model:p.model,mode:prefs.get().mode});
+    if(wasMode==='github'&&p.mode==='github'&&D.repoBefore&&D.repoBefore!==p.repo){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); }
+    closeDialog(); toast(S.mode==='github'?'已儲存，開始同步':'已儲存'); if(!wasMode) location.hash='#/'; route(); if(S.mode==='github') syncAll(); break; }
+  case 'clearKeys': { secrets.clear(); prefs.set({mode:'local'}); S.mode='local'; S.dialog.form.pat=''; S.dialog.form.openai=''; drawDialog(); toast('已清除這個瀏覽器裡的金鑰'); render(); break; }
+  case 'undo': undo(); break; case 'redo': redo(); break;
+  case 'addChild': closeMenu(); addChild(); break; case 'addSibling': closeMenu(); addSibling(); break; case 'outdent': closeMenu(); outdent(); break;
+  case 'edit': closeMenu(); startEdit(S.sel); break;
+  case 'delete': closeMenu(); removeSel(); $('#cv').focus(); break;
+  case 'collapse': closeMenu(); toggleCollapse(); break;
+  case 'copyNode': { closeMenu(); if(!f||!f.parent) return toast('中心主題不能複製'); const cp=ensureIds(JSON.parse(JSON.stringify(f.n).replace(/"id":"[^"]+",?/g,''))); mutate(r=>{find(r,f.parent.id).n.c.splice(f.idx+1,0,cp);},{select:cp.id}); break; }
+  case 'priMenu': closeMenu(); openPriMenu(); break;
+  case 'icons': closeMenu(); S.panel='style'; S.tab='node'; render(); setTimeout(()=>$('#icongrid button')?.focus(),30); break;
+  case 'note': closeMenu(); if(!S.doc) return; if(!f) return toast('先選一個節點'); S.panel=S.panel==='note'?'':'note'; render(); if(S.panel) setTimeout(()=>$('#notearea')?.focus(),30); break;
+  case 'deleteNote': setField('note',''); S.panel=''; render(); break;
+  case 'style': closeMenu(); S.panel=S.panel==='style'?'':'style'; render(); if(S.panel) setTimeout(()=>$('#panelHost [role=tab][aria-selected=true]')?.focus(),30); break;
+  case 'history': closeMenu(); S.panel=S.panel==='history'?'':'history'; S.preview=null; render(); if(S.panel) loadHistory(); break;
+  case 'closePanel': closePanel(); break;
+  case 'tab': S.tab=v; drawPanel(); $(`#st-${v}`)?.focus(); break;
+  case 'theme': S.doc.theme=v; touch(); render(); break;
+  case 'randomTheme': { const ks=Object.keys(THEMES).filter(k=>k!==S.doc.theme); S.doc.theme=ks[Math.floor(Math.random()*ks.length)]; touch(); render(); toast('主題：'+THEMES[S.doc.theme].name,['復原','undoTheme']); S.prevTheme=S.prevTheme; break; }
+  case 'edge': case 'lw': case 'spacing': S.doc.settings={...(S.doc.settings||{}),[a]:v}; touch(); break;
+  case 'rootTop': S.doc.settings={...(S.doc.settings||{}),rootTop:v==='1'}; S.vpFor=null; touch(); drawMap(true); break;
+  case 'minimap': S.minimap=!S.minimap; prefs.set({minimap:S.minimap}); render(); break;
+  case 'hints': S.hints=!S.hints; prefs.set({hints:S.hints}); render(); break;
+  case 'hl': setField('hl',v==='none'?'':v); break;
+  case 'done': setField('done',!(f&&f.n.done)); break;
+  case 'pri': closeMenu(); setField('pri',+v); break;
+  case 'icon': setField('icon',v); break;
+  case 'level': closeMenu(); setLevel(+v); break;
+  case 'zoomIn': zoomAt(1.2); updMenuPct(); break; case 'zoomOut': zoomAt(1/1.2); updMenuPct(); break;
+  case 'fit': closeMenu(); fit(); break;
+  case 'outline': closeMenu(); S.outline=!S.outline; render(); break;
+  case 'olSelect': S.outline=false; S.sel=v; render(); ensureVisible(v); $('#cv').focus(); break;
+  case 'shortcuts': closeMenu(); openDialog({type:'shortcuts'}); break;
+  case 'moreMenu': openMoreMenu(el); break;
+  case 'exportMenu': closeMenu(); openExportMenu(el&&el.closest('.right-actions')?el:$('.right-actions')); break;
+  case 'exp': closeMenu(); exportAs(v); break;
+  case 'import': closeMenu(); pickFile(); break;
+  case 'ai': closeMenu(); openAI('topic'); break;
+  case 'aiNotes': openAI('notes'); break;
+  case 'aiExpand': closeMenu(); if(!S.doc) return openAI('topic'); openAI('expand'); break;
+  case 'aiTab': ['topic','notes','hint'].forEach(k=>{const e2=document.querySelector(`[data-ai="${k}"]`); if(e2) S.dialog[k]=e2.value;}); S.dialog.tab=v; S.dialog.error=null; drawDialog(); $(`#ait-${v}`)?.focus(); break;
+  case 'aiRun': runAI(); break;
+  case 'aiCancel': S.dialog.ctrl&&S.dialog.ctrl.abort(); break;
+  case 'aibarClose': S.aibar=false; render(); break;
+  case 'cfPick': S.dialog.pick=v; drawDialog(); $(`[data-act="cfPick"][data-v="${v}"]`)?.focus(); break;
+  case 'cfApply': applyConflict(); break;
+  case 'preview': preview(v); break; case 'endPreview': endPreview(); break; case 'restore': restorePreview(); break;
+  case 'promptOk': { const D=S.dialog; const val=D.input!==undefined?$('#pr-in').value:true; D.onClose=null; S.dialog=null; drawDialog(); D.resolve(val); break; }
+  case 'cardMenu': openCardMenu(v,el); break;
+  case 'openMap': closeMenu(); location.hash='#/map/'+v; break;
+  case 'renameMap': { closeMenu(); const d=maps.load(v); const t=await askText('重新命名','名稱',d.root.t); if(t&&t.trim()){ d.root.t=t.trim(); d.updated=new Date().toISOString(); storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); } break; }
+  case 'dupMap': { closeMenu(); const d=maps.load(v); const cp=clone(d); cp.id=newId(); cp.root.t=d.root.t+'（副本）'; cp.created=cp.updated=new Date().toISOString(); storeDoc(cp); if(S.mode==='github') schedulePush(cp.id,300); render(); toast('已建立副本'); break; }
+  case 'starMap': { closeMenu(); const d=maps.load(v); d.star=!d.star; storeDoc(d); if(S.mode==='github') schedulePush(v,500); render(); break; }
+  case 'expMapMd': closeMenu(); exportAs('md',maps.load(v)); break;
+  case 'trashMap': { closeMenu(); const d=maps.load(v); d.trashed=true; d.trashedAt=new Date().toISOString(); storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); toast('已移到垃圾桶',['還原','undoTrash:'+v]); break; }
+  case 'restoreMap': { closeMenu(); const d=maps.load(v); delete d.trashed; delete d.trashedAt; storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); toast('已還原'); break; }
+  case 'purgeMap': { closeMenu(); const ok=await confirmBox('永久刪除這張圖？','「'+maps.meta(v).title+'」會從'+(S.mode==='github'?' GitHub 儲存庫':'這個瀏覽器')+'刪除。舊版本仍留在 git 歷史裡。','永久刪除',true); if(!ok) return;
+    const m=maps.meta(v); if(S.mode==='github'&&m.remote){ try{ let sha=m.sha; if(!sha){ sha=(await gh().get(pathOf(v))).sha; } await gh().remove(pathOf(v),sha,`刪除「${m.title}」`); }catch(e){ if(e.status!==404) return toast('刪除失敗：'+e.message); } }
+    maps.remove(v); render(); toast('已永久刪除'); break; }
+  case 'clearSearch': S.q=''; render(); $('#homeq')?.focus(); break;
+  case 'sort': S.sort=v; render(); break;
+  case 'closeMenu': closeMenu(true); break;
+  case 'undoTheme': undo(); break;
+  default: if(a.startsWith('undoTrash:')) act('restoreMap',a.split(':')[1]);
+  } }
+function updMenuPct(){ const p=document.querySelector('.mmenu .pctb'); if(p) p.textContent=Math.round(S.vp.sc*100)+'%'; }
+function readForm(D){ $$('[data-form]').forEach(i=>D.form[i.dataset.form]=i.value); }
+document.addEventListener('click',e=>{ const el=e.target.closest('[data-act]'); if(!el) return; if(el.tagName==='A'&&el.getAttribute('href')&&!el.dataset.act) return; const a=el.dataset.act; if(a==='scrim'&&e.target!==el) return; if(a==='closeMenu'){closeMenu(true);return;} e.preventDefault(); if($('.navdrawer')&&a!=='nav'&&!el.closest('.navdrawer .side')?.matches('x')) {} act(a,el.dataset.v,el); });
+document.addEventListener('click',e=>{ if($('.navdrawer')&&e.target.closest('.navdrawer a')) setTimeout(()=>$('.navdrawer')?.remove(),0); });
+document.addEventListener('input',e=>{ const t=e.target; const k=t.dataset.input;
+  if(k==='q'){ S.q=t.value; const pos=t.selectionStart; render(); const n=$('#homeq'); if(n){n.focus();n.setSelectionRange(pos,pos);} }
+  else if(k==='sideQ'){ S.sideQ=t.value; const pos=t.selectionStart; const inDrawer=!!t.closest('.navdrawer'); const host=inDrawer?$('.navdrawer .side'):$('#side'); host.innerHTML=V.sidebar(S,maps.index()); const n=host.querySelector('#sideq'); n.focus(); n.setSelectionRange(pos,pos); }
+  else if(k==='note'){ clearTimeout(t._t); t._t=setTimeout(()=>{ const f=selInfo(); if(!f) return; const v=t.value; mutate(r=>{const x=find(r,f.n.id).n; if(v.trim()) x.note=v; else delete x.note;}); },400); } });
+document.addEventListener('change',e=>{ const t=e.target; if(t.dataset.input==='sort'){ S.sort=t.value; render(); } if(t.dataset.ai&&S.dialog) S.dialog[t.dataset.ai]=t.value; });
+document.addEventListener('keydown',e=>{ // roving tabindex for tablists
+  const t=e.target; if(t.getAttribute&&t.getAttribute('role')==='tab'&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){ const tabs=[...t.closest('[role=tablist]').querySelectorAll('[role=tab]')]; let i=tabs.indexOf(t); i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length; e.preventDefault(); e.stopPropagation(); tabs[i].click(); }
+  if(t.matches&&t.matches('.hist li[role=button]')&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); t.click(); } },true);
+let rT; addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ shellKey=''; render(); },150); });
+addEventListener('hashchange',route);
+addEventListener('beforeunload',e=>{ if(S.mode==='github'&&maps.index().some(m=>m.dirty)&&navigator.onLine){ maps.index().filter(m=>m.dirty).forEach(m=>pushNow(m.id)); } });
+// boot
+applyUi(); route(); if(S.mode==='github') syncAll(); document.body.dataset.ready='1';
