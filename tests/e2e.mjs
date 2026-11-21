@@ -218,6 +218,8 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   ok('settings warns browser storage can be lost', /清除瀏覽資料/.test(await p.locator('#sp-data').textContent()));
   ok('storage backend shown as IndexedDB', /IndexedDB/.test(await p.locator('#sp-data').textContent()));
   await p.screenshot({path:SHOTS+'/06-settings-storage.png'});
+  ok('new users: Google 雲端硬碟 is the default cloud, GitHub one tap away', await p.locator('[data-act="formBackend"][data-v="drive"][aria-checked="true"]').count()===1);
+  await p.click('[data-act="formBackend"][data-v="github"]'); await W(100);
   await p.click('[data-act="formSync"][data-v="manual"]'); await W(100);
   ok('choosing manual without a token shows a hint', /需要 GitHub 金鑰/.test(await p.locator('#sp-data').textContent()));
   await p.click('[data-act="saveSettings"]'); await W(200);

@@ -767,3 +767,28 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 @media (max-width:768px){.cswatch{gap:0}.csw,.csw.auto{width:44px;height:58px}.csw i,.csw.auto i{width:28px;height:28px}.csw span{font-size:12px}}
 /* review r5: phone details sheet ~62% so the map stays visible; outline list clears the bottom bar */
 @media (max-width:768px){.nsheet{max-height:62%!important}.outline{padding-bottom:0}.outline .doc{padding-bottom:calc(68px + env(safe-area-inset-bottom))}}
+/* v1.4.2 Google Drive sync */
+.bkradio b{display:flex;align-items:center;gap:6px}
+.bkradio b svg{width:16px;height:16px;color:var(--text-2)}
+.gdcard{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--panel)}
+.gdcard.ok{border-color:#9FD8BC;background:#F1FBF6}
+[data-ui=dark] .gdcard.ok{border-color:#2E6B50;background:#12251C}
+.gdav{width:36px;height:36px;border-radius:50%;background:#3F51E8;color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px;flex:none}
+.gdinfo{flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:3px}
+.gdinfo b{font-size:13.5px;overflow-wrap:anywhere}
+.gdinfo span{font-size:12.5px;color:var(--text-2);line-height:1.6}
+.gdcard .btn{height:40px;flex:none}
+.gdhelp{margin-top:10px;font-size:12.5px;color:var(--text-2)}
+.gdhelp summary{cursor:pointer;color:var(--text);text-decoration:underline;text-underline-offset:3px;font-weight:600;min-height:32px;display:flex;align-items:center}
+.gdhelp p{line-height:1.7;margin-top:4px}
+.wbtns{display:flex;flex-direction:column;gap:8px;margin-top:auto}
+.wbtns .btn{margin-top:0}
+.syncbtn.reauth{border-color:#B45309;color:var(--warn-text);background:var(--warn-bg)}
+[data-ui=dark] .syncbtn.reauth{color:#FCD34D;border-color:#B7791F}
+@media (max-width:768px){.gdcard .btn{height:44px;flex:1 1 auto}.gdhelp summary{min-height:44px}}
+/* phone editor top bar with the sync button too (6 round buttons): keep the title pill readable */
+@media (max-width:768px){
+ .top.flt:has(.syncbtn:not([hidden])) .right-actions{gap:4px}
+ .top.flt:has(.syncbtn:not([hidden])) .right-actions .rb,.top.flt .syncbtn:not([hidden]){width:44px;height:44px;min-width:44px;padding:0;justify-content:center}
+ .top.flt:has(.syncbtn:not([hidden])) .backpill{max-width:calc(100vw - 16px - 6px - 6*44px - 5*4px);padding:0 10px 0 6px}
+}

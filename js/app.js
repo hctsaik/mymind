@@ -3,6 +3,7 @@ import { I, esc, THEMES, DEFAULT_THEME, readable, lum, cr, mix } from './core.js
 import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf } from './mapview.js';
 import { prefs, secrets, maps, newId, storage } from './store.js';
 import { client, GitHubError, blobSha } from './github.js';
+import * as GD from './gdrive.js';
 import { merge3, diffSummary } from './merge.js';
 import * as AI from './ai.js';
 import * as IO from './io.js';
@@ -59,6 +60,7 @@ function route(){ const h=location.hash.replace(/^#\/?/,''); const [a,b]=h.split
   if(a==='map'&&b){ const d=maps.load(b); if(!d){ toast('找不到這張圖'); location.hash='#/'; return; } openDoc(d); return; }
   S.view='list'; S.filter=['starred','recent','trash'].includes(a)?a:'all'; closeDoc(); render(); }
 function openDoc(d){ if(S.mapId!==d.id){ S.undo=[];S.redo=[];S.preview=null;S.vp=null;S.panel=S.panel==='history'?'':S.panel; S.sel=d.root.id; S.outline=false; S.find=null; }
+  if(S.mapId!==d.id&&remote()&&Date.now()-(S.lastOpenPull||0)>20000){ S.lastOpenPull=Date.now(); setTimeout(()=>syncNow({push:false,reason:'open'}),0); } // pull on open: pick up edits from other devices
   S.view='editor'; S.mapId=d.id; S.doc=d; maps.setMeta(d.id,{opened:new Date().toISOString()}); const m=maps.meta(d.id); if(S.sync.state!=='error'&&S.sync.state!=='offline') S.sync.state=m&&m.dirty&&remote()?'dirty':'saved'; render(); }
 function closeDoc(){ S.find=null; S.doc=null; S.mapId=null; S.editing=null; }
 // ---------- rendering ----------
@@ -321,7 +323,7 @@ function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove
   if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
 function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
   if(e.shiftKey&&document.activeElement===a){e.preventDefault();z.focus();} else if(!e.shiftKey&&document.activeElement===z){e.preventDefault();a.focus();} }
-function openSettings(tab='data',extra={}){ const p=prefs.get(); const D={type:'settings',tab,repoBefore:p.repo,form:{repo:p.repo,pat:secrets.pat(),openai:secrets.openai(),model:p.model,lines:p.lines,ui:p.ui,reduceMotion:p.reduceMotion,sync:p.sync},syncTouched:false,lastBackup:p.lastBackup,backend:storage.backend,...extra}; openDialog(D);
+function openSettings(tab='data',extra={}){ const p=prefs.get(); const D={type:'settings',tab,repoBefore:p.repo,form:{repo:p.repo,pat:secrets.pat(),openai:secrets.openai(),model:p.model,lines:p.lines,ui:p.ui,reduceMotion:p.reduceMotion,sync:p.sync,backend:p.backend||(secrets.pat()||tab==='gh'?'github':'drive')},drive:p.driveEmail?{email:p.driveEmail,name:p.driveName||''}:null,driveAuth:isDrive()&&!!p.driveEmail&&!GD.hasToken(),syncTouched:false,lastBackup:p.lastBackup,backend:storage.backend,...extra}; openDialog(D);
   Promise.all([storage.persisted(),storage.estimate()]).then(([per,est])=>{ D.persisted=per; D.usage=est&&est.usage; if(S.dialog===D) drawDialog(); }); }
 function askText(title,label,value,ok){ return new Promise(res=>openDialog({type:'prompt',title,label,input:value,ok:'確定',focus:'#pr-in',resolve:res,onClose:()=>res(null)})); }
 function confirmBox(title,sub,ok,danger){ return new Promise(res=>openDialog({type:'prompt',title,sub,ok,danger,resolve:res,onClose:()=>res(null)})); }
@@ -345,11 +347,19 @@ function aiFromBar(text){ const f=S.doc&&(selInfo()||{n:S.doc.root}); openAI('ex
 // Modes (prefs.sync): 'local' = browser only (IndexedDB), never touches the network;
 // 'manual' = changes stay local until 同步 / Ctrl+S; 'auto' = batched: at most one commit every AUTO_MS, plus when the tab is hidden.
 // Every push sends ALL unsynced maps (and pending deletes) as ONE commit through the git data API.
-const remote=()=>S.syncMode!=='local'&&!!secrets.pat();
-const gh=()=>{ const t=secrets.pat(); return remote()?client(t,S.repo):null; };
+// Backend (prefs.backend): 'github' (fine-grained PAT, one commit per sync) or 'drive' (Google Drive folder "MyMind", drive.file scope).
+// One backend is active at a time; switching re-uploads this browser's maps to the new one (the old copy is left untouched).
+const isDrive=()=>prefs.get().backend==='drive';
+const BN=()=>isDrive()?'Google 雲端硬碟':'GitHub';
+const remote=()=>S.syncMode!=='local'&&(isDrive()?!!prefs.get().driveEmail:!!secrets.pat());
+let driveC=null; const dc=()=>driveC||(driveC=GD.driveClient());
+const gh=()=>{ if(!remote()) return null; if(isDrive()) return GD.hasToken()?dc():null; return client(secrets.pat(),S.repo); };
+// Drive needs a fresh token after ~1 h or a reload: one click on 「重新連結」 (a popup that closes itself once access was granted)
+async function driveSignIn({consent=false}={}){ const p=prefs.get(); await GD.signIn({hint:p.driveEmail||'',prompt:consent?'consent':''}); driveC=null; S.driveAuth=false; }
+async function driveReauth(){ try{ await driveSignIn(); setSync('dirty'); await syncNow({reason:'manual'}); }catch(e){ if(e.status!==-1||!/關閉/.test(e.message)) toast(e.message); } }
 const pathOf=id=>`maps/${id}.json`;
 const AUTO_MS=()=>+prefs.get().autoMs||3*60*1000;
-function syncInfo(){ S.prefs=prefs.get(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); }
+function syncInfo(){ S.prefs=prefs.get(); S.backend=S.prefs.backend||'github'; S.backendName=BN(); S.driveEmail=S.prefs.driveEmail||''; S.driveAuth=isDrive()&&remote()&&!GD.hasToken(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); }
 let autoT=null, persistAsked=false;
 function changed(){ syncInfo(); if(S.remote&&S.syncMode==='auto') scheduleAuto(); if(S.view!=='editor') return; }
 function scheduleAuto(){ if(autoT) return; S.autoAt=Date.now()+AUTO_MS(); autoT=setTimeout(()=>{ autoT=null; S.autoAt=null; syncNow({reason:'auto'}); },AUTO_MS()); }
@@ -358,12 +368,14 @@ function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='sav
 let syncing=null, syncAgain=false;
 async function syncNow(opt={}){ if(syncing){ syncAgain=syncAgain||opt.push!==false; return syncing; }
   syncing=(async()=>{ try{ await syncOnce(opt); } finally { syncing=null; if(syncAgain){ syncAgain=false; await syncNow(); } } })(); return syncing; }
-async function syncOnce({push=true,reason='manual'}={}){ const c=gh(); if(!c) return;
+async function syncOnce({push=true,reason='manual'}={}){ const c=gh(); if(!c){ if(remote()&&isDrive()){ syncInfo(); setSync('auth','需要重新連結 Google 才能同步'); } return; }
   if(!navigator.onLine){ setSync('offline'); return; }
   if(push&&maps.dirtyCount()||reason==='manual') setSync('saving'); let pulled=0, pushedN=0;
   try{
     for(let attempt=0;attempt<2;attempt++){
       const files=(await c.list('maps')).filter(f=>f.name.endsWith('.json')); const rsha=new Map(files.map(f=>[f.name.replace(/\.json$/,''),f.sha]));
+      // maps that exist on both sides but were never synced from here (new device, backend switch): same content = already in sync
+      for(const m of maps.index()){ const rs=rsha.get(m.id); if(!rs||m.sha||!m.dirty) continue; try{ const r=await c.blob(rs); const d=JSON.parse(r.text), mine=maps.load(m.id); if(mine&&JSON.stringify({...d,id:m.id})===JSON.stringify(mine)){ maps.saveBase(m.id,mine); maps.setMeta(m.id,{sha:rs,remote:true,dirty:false}); } }catch{} }
       let conflicts=[];
       if(push){ const dirty=maps.index().filter(m=>m.dirty); const dels=maps.deletes(); const changes=[], pushed=[];
         for(const m of dirty){ const rs=rsha.get(m.id); if(rs&&rs!==m.sha){ conflicts.push(m.id); continue; } const doc=maps.load(m.id); if(!doc){ maps.setMeta(m.id,{dirty:false}); continue; }
@@ -371,11 +383,12 @@ async function syncOnce({push=true,reason='manual'}={}){ const c=gh(); if(!c) re
         const delIds=dels.filter(id=>rsha.has(id)); delIds.forEach(id=>changes.push({path:pathOf(id),del:true}));
         if(changes.length){ const names=pushed.map(x=>'「'+x.title+'」');
           const msg=pushed.length===1&&!delIds.length?`${maps.meta(pushed[0].id).sha?'更新':'建立'}${names[0]}`:`同步 ${pushed.length} 張心智圖${delIds.length?`、刪除 ${delIds.length} 張`:''}${names.length?'：'+names.slice(0,5).join('、')+(names.length>5?'…':''):''}`;
-          try{ await c.commitFiles(changes,msg); }
+          let res; try{ res=await c.commitFiles(changes,msg); }
           catch(e){ if((e.status===409||e.status===422)&&attempt===0) continue; throw e; } // someone else moved the branch: re-list and retry once
-          for(const x of pushed){ const sha=await blobSha(x.text); const latest=maps.load(x.id); maps.setMeta(x.id,{sha,remote:true,dirty:JSON.stringify(latest)!==JSON.stringify(x.doc)}); maps.saveBase(x.id,x.doc); rsha.set(x.id,sha); }
+          for(const x of pushed){ const sha=res&&res.shas&&res.shas[pathOf(x.id)]||await blobSha(x.text); const latest=maps.load(x.id); maps.setMeta(x.id,{sha,remote:true,dirty:JSON.stringify(latest)!==JSON.stringify(x.doc)}); maps.saveBase(x.id,x.doc); rsha.set(x.id,sha); }
           S.lastPush={at:Date.now(),maps:pushed.length,deletes:delIds.length}; pushedN=pushed.length+delIds.length; }
-        maps.setDeletes(maps.deletes().filter(id=>!dels.includes(id))); }
+        maps.setDeletes(maps.deletes().filter(id=>!dels.includes(id)));
+        if(changes.length&&c.writeIndex){ try{ await c.writeIndex(maps.index().filter(m=>!m.trashed).map(m=>({id:m.id,title:m.title,icon:m.icon||'',updated:m.updated,file:m.id+GD.EXT}))); }catch(e){ if(e.status===401) throw e; } } }
       // pull: new or changed files from other devices (read-only, no commits)
       const deletes=new Set(maps.deletes());
       for(const [id,sha] of rsha){ const m=maps.meta(id); if(deletes.has(id)||m&&m.sha===sha) continue; if(m&&m.dirty){ if(!conflicts.includes(id)) conflicts.push(id); continue; }
@@ -384,9 +397,9 @@ async function syncOnce({push=true,reason='manual'}={}){ const c=gh(); if(!c) re
       for(const m of maps.index()){ if(m.remote&&!rsha.has(m.id)&&!m.dirty){ maps.remove(m.id); if(S.mapId===m.id) location.hash='#/'; } else if(m.remote&&!rsha.has(m.id)&&m.dirty) maps.setMeta(m.id,{sha:null}); }
       syncInfo(); setSync(conflicts.length?'error':S.unsynced?'dirty':'saved',conflicts.length?'雲端有比較新的版本':'');
       if(conflicts.length) await openConflict(conflicts[0],rsha.get(conflicts[0]));
-      if(reason==='manual'&&!conflicts.length) toast(pushedN?(pushedN>1?`已同步 ${pushedN} 項到 GitHub（1 個 commit）`:'已同步到 GitHub')+(pulled?`，並更新 ${pulled} 張其他裝置改過的圖`:''):pulled?`已從 GitHub 更新 ${pulled} 張圖`:'已是最新版本');
+      if(reason==='manual'&&!conflicts.length) toast(pushedN?(pushedN>1?`已同步 ${pushedN} 項到 ${BN()}${isDrive()?'':'（1 個 commit）'}`:`已同步到 ${BN()}`)+(pulled?`，並更新 ${pulled} 張其他裝置改過的圖`:''):pulled?`已從 ${BN()} 更新 ${pulled} 張圖`:'已是最新版本');
       render(); return; }
-  }catch(e){ if(e.status===0) setSync('offline'); else setSync('error',e.status===401?'金鑰無效或過期（401）':e.status===403?'金鑰沒有寫入權限（403）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message); render(); } }
+  }catch(e){ if(e.status===0) setSync('offline'); else if(isDrive()&&e.status===401){ GD.forgetToken(); syncInfo(); setSync('auth','Google 登入已過期，按「重新連結」繼續同步'); } else if(isDrive()) setSync('error',e.status===403?'Google 雲端硬碟拒絕存取（403）：請重新連結並勾選權限':e.status===404?'雲端找不到檔案（404）':e.status===429||e.status>=500?'Google 暫時忙碌，稍後會再試':e.message); else setSync('error',e.status===401?'金鑰無效或過期（401）':e.status===403?'金鑰沒有寫入權限（403）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message); render(); } }
 const syncAll=()=>syncNow({push:S.syncMode==='auto'&&maps.dirtyCount()>0,reason:'auto'});
 const pushNow=()=>syncNow({reason:'manual'});
 async function openConflict(id,sha){ const c=gh(); let remoteF; try{ remoteF=sha?await c.blob(sha):await c.get(pathOf(id)); }catch(e){ return setSync('error',e.message); }
@@ -491,6 +504,13 @@ async function act(a,v,el){ const f=selInfo();
   case 'navClose': $('.navdrawer')?.remove(); break;
   case 'settings': closeMenu(); if(S.dialog) S.dialog=null; openSettings(v||'data'); break;
   case 'settingsA11y': closeMenu(); openSettings('a11y'); break;
+  case 'welcomeDrive': openSettings('data',{fromWelcome:true}); S.dialog.form.backend='drive'; drawDialog(); break;
+  case 'formBackend': readForm(S.dialog); S.dialog.form.backend=v; S.dialog.driveErr=''; drawDialog(); $(`[data-act="formBackend"][data-v="${v}"]`)?.focus(); break;
+  case 'driveConnect': { const D=S.dialog; if(!D||D.driveBusy) break; readForm(D); D.driveBusy=true; D.driveErr=''; drawDialog();
+    try{ await GD.signIn({hint:(D.drive&&D.drive.email)||prefs.get().driveEmail||''}); driveC=null; const c=dc(); const u=await c.about(); await c.ensureFolder(); D.drive={email:u.email,name:u.name}; D.driveAuth=false; D.form.backend='drive'; if(D.form.sync==='local'&&!D.syncTouched) D.form.sync='manual';
+      if(prefs.get().driveEmail===u.email&&isDrive()){ syncInfo(); render(); } toast(`已連結 ${u.email}`); }
+    catch(e){ D.driveErr=e.message; } D.driveBusy=false; if(S.dialog===D){ drawDialog(); $('[data-act="driveDisconnect"],[data-act="driveConnect"]')?.focus(); } break; }
+  case 'driveDisconnect': { const D=S.dialog; GD.revoke(); driveC=null; const wasDrive=isDrive(); prefs.set({driveEmail:'',driveName:'',...(wasDrive?{sync:'local'}:{})}); if(D){ D.drive=null; D.driveAuth=false; if(D.form.backend==='drive') D.form.sync='local'; drawDialog(); } syncInfo(); render(); toast('已中斷和 Google 雲端硬碟的連結；圖仍存在這個瀏覽器，雲端上的檔案也還在'); break; }
   case 'welcomeGithub': openSettings('gh',{fromWelcome:true}); break;
   case 'welcomeLocal': prefs.set({mode:'local',sync:'local'}); S.mode='local'; S.syncMode='local'; askPersist(); location.hash='#/'; route(); break;
   case 'closeDialog': closeDialog(); break;
@@ -508,14 +528,20 @@ async function act(a,v,el){ const f=selInfo();
   case 'backup': closeMenu(); backupAll(); if(S.dialog) { S.dialog.lastBackup=prefs.get().lastBackup; drawDialog(); } break;
   case 'restore': closeMenu(); { const inp=document.createElement('input'); inp.type='file'; inp.accept='.mymind,.json'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); if(d.format!=='mymind-backup/1') throw new Error('這不是 MyMind 備份檔'); restoreBackup(d); }catch(e){ toast('還原失敗：'+e.message); } }; inp.click(); } break;
   case 'dismissBackup': prefs.set({backupSnooze:new Date().toISOString()}); render(); break;
-  case 'syncNow': closeMenu(); if(!remote()){ openSettings('data'); break; } await pushNow(); break;
-  case 'saveSettings': { const D=S.dialog; readForm(D); const pat=D.form.pat.trim();
-    let sync=D.form.sync; if(pat&&!secrets.pat()&&sync==='local'&&!D.syncTouched) sync='manual'; // just connected GitHub: default to manual sync
-    if(sync!=='local'&&!pat){ D.tab='gh'; D.syncErr='要同步到 GitHub，請先貼上金鑰並按「測試」；或選「只存瀏覽器」。'; drawDialog(); $('#f-pat')?.focus(); break; }
+  case 'syncNow': closeMenu(); if(!remote()){ openSettings('data'); break; } if(isDrive()&&!GD.hasToken()){ await driveReauth(); break; } await pushNow(); break;
+  case 'saveSettings': { const D=S.dialog; readForm(D); const pat=D.form.pat.trim(); const P0=prefs.get(), bk=D.form.backend==='drive'&&!(D.drive&&D.drive.email)&&pat&&!P0.backend?'github':(D.form.backend||'github'), prevBk=P0.backend||'github', wasRemote=remote();
+    let sync=D.form.sync; if(bk==='github'&&pat&&!secrets.pat()&&sync==='local'&&!D.syncTouched) sync='manual'; // just connected GitHub: default to manual sync
+    if(bk==='github'&&sync!=='local'&&!pat){ D.tab='gh'; D.syncErr='要同步到 GitHub，請先貼上金鑰並按「測試」；或選「只存瀏覽器」。'; drawDialog(); $('#f-pat')?.focus(); break; }
+    if(bk==='drive'&&sync!=='local'&&!(D.drive&&D.drive.email)){ D.driveErr='要同步到 Google 雲端硬碟，請先按「連結 Google 雲端硬碟」；或選「只存瀏覽器」。'; drawDialog(); $('[data-act="driveConnect"]')?.focus(); break; }
+    // switching backend (or Drive account): pull what the old one has first (best effort), then upload everything to the new one
+    const newEmail=bk==='drive'?((D.drive&&D.drive.email)||''):'', migrate=sync!=='local'&&(bk!==prevBk||(bk==='drive'&&newEmail!==(P0.driveEmail||'')))&&maps.index().length>0;
+    if(migrate&&wasRemote&&gh()){ try{ await syncNow({push:false,reason:'switch'}); }catch{} }
+    prefs.set({backend:bk,driveEmail:bk==='drive'?newEmail:(P0.driveEmail||''),driveName:bk==='drive'?((D.drive&&D.drive.name)||''):(P0.driveName||'')});
+    if(migrate){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); maps.setDeletes([]); }
     const p={repo:D.form.repo.trim()||'hctsaik/mymind-data',model:D.form.model.trim()||'gpt-4o-mini',sync}; secrets.setPat(pat); secrets.setOpenai(D.form.openai.trim());
-    const wasMode=S.mode; p.mode=pat?'github':(S.mode||'local'); prefs.set(p); Object.assign(S,{repo:p.repo,model:p.model,mode:p.mode,syncMode:p.sync});
-    if(D.repoBefore&&D.repoBefore!==p.repo){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); maps.setDeletes([]); }
-    closeDialog(); toast(sync==='local'?'已儲存：只存在這個瀏覽器':sync==='manual'?'已儲存：按「同步」才會上傳':'已儲存：自動同步（每幾分鐘最多一次）'); if(!wasMode) location.hash='#/'; route();
+    const wasMode=S.mode; p.mode=bk==='drive'&&newEmail?'drive':pat?'github':(S.mode||'local'); prefs.set(p); Object.assign(S,{repo:p.repo,model:p.model,mode:p.mode,syncMode:p.sync});
+    if(bk==='github'&&prevBk==='github'&&D.repoBefore&&D.repoBefore!==p.repo){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); maps.setDeletes([]); }
+    closeDialog(); toast(migrate?`已切換到 ${BN()}：${maps.index().length} 張圖${sync==='auto'?'正在上傳':'會在按「同步」時上傳'}；原本的雲端資料不會刪除`:sync==='local'?'已儲存：只存在這個瀏覽器':sync==='manual'?'已儲存：按「同步」才會上傳':'已儲存：自動同步（每幾分鐘最多一次）'); if(!wasMode) location.hash='#/'; route();
     if(remote()) syncNow({push:sync==='auto',reason:'auto'}); break; }
   case 'clearKeys': { secrets.clear(); prefs.set({sync:'local'}); S.syncMode='local'; S.dialog.form.pat=''; S.dialog.form.openai=''; S.dialog.form.sync='local'; drawDialog(); toast('已清除這個瀏覽器裡的金鑰；圖仍存在這個瀏覽器'); render(); break; }
   case 'undo': undo(); break; case 'redo': redo(); break;
@@ -657,4 +683,4 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||/^(localhost|127
   }).catch(e=>console.warn('service worker:',e.message)); });
 }
 (async()=>{ await storage.init(); syncInfo(); applyUi(); route(); document.body.dataset.ready='1'; if(maps.index().length) askPersist(); if(remote()) syncAll(); })();
-window.__mmStore={maps,storage,flush:()=>storage.flush(),syncNow:o=>syncNow(o)}; // test hooks (no secrets)
+window.__mmStore={maps,storage,flush:()=>storage.flush(),syncNow:o=>syncNow(o),changed:()=>{ changed(); drawChrome(); }}; // test hooks (no secrets)

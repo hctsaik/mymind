@@ -8,12 +8,15 @@ export function rel(iso){ if(!iso) return ''; const d=new Date(iso), s=(Date.now
   if(s<60) return '剛剛'; if(s<3600) return Math.floor(s/60)+' 分鐘前'; if(s<86400&&new Date().getDate()===d.getDate()) return '今天 '+d.toTimeString().slice(0,5);
   if(s<172800) return '昨天 '+d.toTimeString().slice(0,5); return `${d.getMonth()+1}/${d.getDate()}`; }
 const MODE_NAME={local:'只存瀏覽器',manual:'手動同步',auto:'自動同步'};
-const syncLine=(S)=>S.remote?`<b><span class="g" aria-hidden="true" style="${S.sync.state==='error'?'background:var(--danger)':S.sync.state==='offline'?'background:var(--warn-line)':''}"></span>${S.sync.state==='offline'?'離線（稍後同步）':S.sync.state==='error'?'同步失敗':MODE_NAME[S.syncMode]}</b><span class="repo">GitHub · ${esc(S.repo)}</span>`:`<b>只存在這個瀏覽器</b><button class="linkbtn" data-act="settings" data-v="data">備份或連接 GitHub（選用）</button>`;
+const where=S=>S.backend==='drive'?`Google 雲端硬碟 · ${esc(S.driveEmail)}`:`GitHub · ${esc(S.repo)}`;
+const syncLine=(S)=>S.remote?`<b><span class="g" aria-hidden="true" style="${S.sync.state==='error'?'background:var(--danger)':S.sync.state==='offline'||S.driveAuth?'background:var(--warn-line)':''}"></span>${S.sync.state==='offline'?'離線（稍後同步）':S.driveAuth?'需要重新連結':S.sync.state==='error'?'同步失敗':MODE_NAME[S.syncMode]}</b><span class="repo">${where(S)}</span>`:`<b>只存在這個瀏覽器</b><button class="linkbtn" data-act="settings" data-v="data">備份或連接雲端（選用）</button>`;
 // 同步 button: visible whenever GitHub sync is on; the badge counts maps (and deletions) not yet on GitHub
 export function syncBtn(S,k='top'){ if(!S.remote) return `<span class="syncbtn" data-k="${k}" hidden></span>`; const n=S.unsynced, busy=S.sync.state==='saving';
+  if(S.driveAuth){ const l=`重新連結 Google 才能同步${n?`（${n} 項未同步）`:''}`; const bd=n?`<span class="nbadge" aria-hidden="true">${n>99?'99+':n}</span>`:'';
+    return k==='side'?`<button class="btn syncbtn side-sync has reauth" data-k="side" data-act="syncNow" aria-label="${l}">${I('alert')}<span>重新連結 Google</span>${bd}</button>`:`<button class="btn syncbtn has reauth" data-k="${k}" data-act="syncNow" aria-label="${l}" title="${l}">${I('alert')}<span class="lbl">重新連結</span>${bd}</button>`; }
   const lbl=busy?'同步中…':n?`同步（${n} 項未同步）`:'已同步，再同步一次';
   const badge=n?`<span class="nbadge" aria-hidden="true">${n>99?'99+':n}</span>`:'';
-  if(k==='side') return `<button class="btn syncbtn side-sync ${n?'has':''}" data-k="side" data-act="syncNow" aria-label="${lbl}"${busy?' aria-busy="true"':''}>${I('cloud')}<span>${busy?'同步中…':n?'同步到 GitHub':'已同步'}</span>${badge}</button>`;
+  if(k==='side') return `<button class="btn syncbtn side-sync ${n?'has':''}" data-k="side" data-act="syncNow" aria-label="${lbl}"${busy?' aria-busy="true"':''}>${I('cloud')}<span>${busy?'同步中…':n?(S.backend==='drive'?'同步到雲端硬碟':'同步到 GitHub'):'已同步'}</span>${badge}</button>`;
   return `<button class="btn syncbtn ${n?'has':''}" data-k="${k}" data-act="syncNow" aria-label="${lbl}" title="${lbl}（Ctrl+S）"${busy?' aria-busy="true"':''}>${I('cloud')}<span class="lbl">${busy?'同步中…':'同步'}</span>${badge}</button>`; }
 export function sidebar(S,list){
   const cnt=k=>list.filter(m=>k==='all'?!m.trashed:k==='starred'?m.star&&!m.trashed:k==='trash'?m.trashed:!m.trashed).length;
@@ -30,9 +33,10 @@ export function savedChip(S){ const s=S.sync; let ic='cloud',l,sh;
   if(!S.remote){l='已存在這個瀏覽器';sh='已存本機';}
   else if(s.state==='saving'){l='同步中…';sh='同步中';}
   else if(s.state==='offline'){ic='alert';l='離線：已存本機，恢復連線後再同步';sh='離線';}
+  else if(S.driveAuth){ic='alert';l='已存本機 · 需要重新連結 Google 才能同步';sh='待連結';}
   else if(s.state==='error'){ic='alert';l='同步失敗：'+(s.msg||'');sh='失敗';}
   else if(S.unsynced){l=`已存本機 · ${S.unsynced} 項未同步`+(S.syncMode==='auto'&&S.autoAt?` · 約 ${Math.max(1,Math.round((S.autoAt-Date.now())/60000))} 分鐘內自動同步`:S.syncMode==='manual'?' · 按「同步」上傳':'');sh='未同步';}
-  else {l='已同步到 GitHub'+(s.at?' · '+rel(s.at):'');sh='已同步';}
+  else {l='已同步到 '+(S.backendName||'GitHub')+(s.at?' · '+rel(s.at):'');sh='已同步';}
   return `<span class="saved ${s.state==='error'?'err':''}" role="status" aria-live="polite">${I(ic)}<span class="long">${esc(l)}</span><span class="short">${esc(sh)}</span></span>`;}
 export function topbar(S,doc,curNode){
   const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','詳情','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
@@ -115,10 +119,10 @@ export function historyPanel(S){ const H=S.hist;
   return `<section class="stylep" data-dock="${isMobile()?'bottom':'right'}" aria-label="版本歷史">
    <div class="phead"><h3>版本歷史</h3><span class="kbd desk-only" style="margin-left:6px">Shift+Alt+H</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉">${I('x')}</button></div>
    <div class="pbody">${S.preview?`<div class="pvcard" role="status"><div>${I('history')}<span>正在預覽 <b>${esc(S.preview.label)}</b> 的版本（唯讀）</span></div><div class="acts"><button class="btn primary" data-act="restore">還原這個版本</button><button class="btn" data-act="endPreview">回到目前版本</button></div></div>`:''}
-   <p class="panel-note" style="margin:0 0 12px">每次同步都是 <code>${esc(S.repo.split('/')[1]||'mymind-data')}</code> 的一個 commit（一次同步多張圖也只算一個）。還原會新增一個 commit，不會改寫歷史。</p>
-   ${!S.remote?`<p class="panel-note">目前「只存瀏覽器」，沒有版本歷史。到 設定 › 儲存與同步 打開 GitHub 同步後，每次同步都會留下一個版本。</p>`:H.loading?`<p class="panel-note" role="status">讀取中…</p>`:H.error?`<div class="alert err" role="alert">${I('alert')}<div>${esc(H.error)}</div></div>`:!H.items.length?`<p class="panel-note">這張圖還沒有同步到 GitHub。</p>`:
-   `<ul class="hist">${H.items.map((i,k)=>`<li class="${S.preview&&S.preview.sha===i.sha?'on':''} ${k===0?'cur':''}" tabindex="0" role="button" data-act="preview" data-v="${i.sha}" aria-label="${esc(rel(i.date))} ${esc(i.msg)}"><b>${esc(rel(i.date))}${k===0?' · 目前版本':''}</b><div class="m">${esc(i.msg)}</div><div class="s"><code>${i.sha.slice(0,7)}</code><span>${esc(i.author||'')}</span></div></li>`).join('')}</ul>
-   <a class="btn" style="width:100%;margin-top:10px" href="https://github.com/${esc(S.repo)}/commits/main/maps/${esc(S.mapId)}.json" target="_blank" rel="noopener">${I('ext')}在 GitHub 上看完整紀錄</a>`}</div></section>`;}
+   <p class="panel-note" style="margin:0 0 12px">${S.backend==='drive'?'Google 雲端硬碟會保留每張圖較近的舊版本（約 30 天、最多 100 個）。還原會新增一個版本，不會改寫舊的。':`每次同步都是 <code>${esc(S.repo.split('/')[1]||'mymind-data')}</code> 的一個 commit（一次同步多張圖也只算一個）。還原會新增一個 commit，不會改寫歷史。`}</p>
+   ${!S.remote?`<p class="panel-note">目前「只存瀏覽器」，沒有版本歷史。到 設定 › 儲存與同步 打開 GitHub 或 Google 雲端硬碟同步後，每次同步都會留下一個版本。</p>`:S.driveAuth?`<div class="alert warn" role="note">${I('info')}<div>重新連結 Google 才能讀取版本紀錄。<button class="btn" style="margin-top:8px" data-act="syncNow">重新連結</button></div></div>`:H.loading?`<p class="panel-note" role="status">讀取中…</p>`:H.error?`<div class="alert err" role="alert">${I('alert')}<div>${esc(H.error)}</div></div>`:!H.items.length?`<p class="panel-note">這張圖還沒有同步到 ${esc(S.backendName||'GitHub')}。</p>`:
+   `<ul class="hist">${H.items.map((i,k)=>`<li class="${S.preview&&S.preview.sha===i.sha?'on':''} ${k===0?'cur':''}" tabindex="0" role="button" data-act="preview" data-v="${i.sha}" aria-label="${esc(rel(i.date))} ${esc(i.msg)}"><b>${esc(rel(i.date))}${k===0?' · 目前版本':''}</b><div class="m">${esc(i.msg)}</div><div class="s">${S.backend==='drive'?'':`<code>${i.sha.slice(0,7)}</code>`}<span>${esc(i.author||'')}</span></div></li>`).join('')}</ul>
+   ${S.backend==='drive'?'':`<a class="btn" style="width:100%;margin-top:10px" href="https://github.com/${esc(S.repo)}/commits/main/maps/${esc(S.mapId)}.json" target="_blank" rel="noopener">${I('ext')}在 GitHub 上看完整紀錄</a>`}`}</div></section>`;}
 export function outlineView(root,S={}){ const rows=[]; const m=isMobile(); let N=0;
   (function w(n,lv){ N++; const k=n.c||[], has=k.length>0, tg=tagsOf(n);
     rows.push(`<div class="olr${S.olId===n.id?' cur':''}${lv===0?' root':lv===1?' l1':''}" role="treeitem" aria-level="${lv+1}"${has?` aria-expanded="${!n.collapsed}"`:''} data-id="${n.id}" style="--lv:${lv}">
@@ -166,23 +170,33 @@ export function home(S,list,docs){ const f=S.filter; const titles={all:'所有�
      <select class="sortsel" aria-label="排序" data-input="sort">${[['updated','排序：最近編輯'],['name','排序：名稱'],['created','排序：建立時間']].map(([v,n])=>`<option value="${v}"${S.sort===v?' selected':''}>${n}</option>`).join('')}</select></div>`:''}
    ${shown.length?`<div class="grid">${cards}</div>`:emptyBox}</div>`;}
 export function welcome(){ return `<div class="welcome" id="content"><div class="hero"><div class="logo" style="width:56px;height:56px;border-radius:16px;margin:0 auto" aria-hidden="true">${LOGO.replace('<svg ','<svg style="width:30px;height:30px" ')}</div>
-   <h1>歡迎使用 MyMind</h1><p class="lead">打開就能畫心智圖，圖會存在這個瀏覽器。想在手機和電腦之間同步、保留版本紀錄時，再連接 GitHub（選用）。</p></div>
+   <h1>歡迎使用 MyMind</h1><p class="lead">打開就能畫心智圖，圖會存在這個瀏覽器。想在手機和電腦之間同步、保留版本紀錄時，再連接 GitHub 或 Google 雲端硬碟（選用）。</p></div>
    <div class="choices">
     <div class="choice rec"><h3>${I('laptop')}先存在這個瀏覽器<span class="tagrec">建議</span></h3><ul><li>不用帳號，馬上開始</li><li>所有功能都能用（AI 需要 OpenAI 金鑰）</li><li>可以隨時匯出全部備份、之後再連接 GitHub</li></ul><p class="wnote">${I('info')}<span>清除瀏覽器的網站資料時，圖會一起刪除，記得定期備份</span></p><button class="btn primary" data-act="welcomeLocal">先存在這個瀏覽器</button></div>
-    <div class="choice"><h3>${I('git')}同步到 GitHub<span class="tagopt">選用</span></h3><ul><li>手機、電腦同步</li><li>每次同步都有版本歷史</li><li>可選手動同步或每幾分鐘自動同步</li></ul><p class="wnote2">約 2 分鐘：建立一把只能存取 mymind-data 的金鑰</p><button class="btn" data-act="welcomeGithub">連接 GitHub</button></div>
+    <div class="choice"><h3>${I('cloud')}同步到雲端<span class="tagopt">選用</span></h3><ul><li>手機、電腦同步</li><li>保留版本紀錄</li><li>可選手動同步或每幾分鐘自動同步</li></ul><p class="wnote2">Google 雲端硬碟：用 Google 帳號登入即可 · GitHub：約 2 分鐘建立金鑰</p><div class="wbtns"><button class="btn" data-act="welcomeDrive">連結 Google 雲端硬碟</button><button class="btn" data-act="welcomeGithub">連接 GitHub</button></div></div>
    </div>
    <p class="wfoot">已經有大綱？<button class="linkbtn" data-act="welcomeMd">貼上 Markdown 建立第一張圖</button></p>
    <p class="wfoot" style="margin-top:6px">之後可以在 設定 › 儲存與同步 隨時更改。</p></div>`;}
 function lineSample(c){return `<svg class="lsample" viewBox="0 0 132 52" aria-hidden="true"><rect x=".5" y=".5" width="131" height="51" rx="8" fill="#FFFFFF" stroke="var(--ctl)"/><rect x="8" y="17" width="34" height="18" rx="9" fill="#FFBB91" stroke="${c}" stroke-width="1.5"/><path d="M42 26H52M52 13.5V38.5M52 13.5H62M52 38.5H62" fill="none" stroke="${c}" stroke-width="1.5" stroke-linejoin="round"/><rect x="62" y="5" width="44" height="17" rx="5" fill="#FFFFFF" stroke="${c}" stroke-width="1.5"/><rect x="62" y="30" width="44" height="17" rx="5" fill="#FFFFFF" stroke="${c}" stroke-width="1.5"/><path d="M106 13.5H114M106 38.5H114" stroke="${c}" stroke-width="1.5"/><rect x="117" y="11" width="10" height="5" rx="2.5" fill="#3B2A20"/><rect x="117" y="36" width="10" height="5" rx="2.5" fill="#3B2A20"/></svg>`;}
 export function settingsDialog(S,D){ const a11y=D.tab==='a11y', data=D.tab==='data', p=D.form;
-  const mode=p.sync||'local', hasPat=!!(p.pat||'').trim();
+  const mode=p.sync||'local', hasPat=!!(p.pat||'').trim(), bk=p.backend||'github', drv=bk==='drive', dv=D.drive, bn=drv?'Google 雲端硬碟':'GitHub';
+  const bradio=(v,ic,t,sub)=>`<button class="radio bkradio" role="radio" data-act="formBackend" data-v="${v}" aria-checked="${bk===v}"><span class="dot"></span><div><b>${I(ic)}${t}</b><span>${sub}</span></div></button>`;
+  const driveCard=dv&&dv.email?`<div class="gdcard ok" role="group" aria-label="Google 雲端硬碟帳號"><div class="gdav" aria-hidden="true">${esc((dv.name||dv.email).trim().slice(0,1).toUpperCase())}</div><div class="gdinfo"><b>已連結 ${esc(dv.email)}</b><span>檔案在你的雲端硬碟「MyMind」資料夾，每張圖一個 .mymind 檔，另有 index.json 目錄。</span></div>
+      ${D.driveAuth?`<button class="btn primary" data-act="driveConnect">${I('cloud')}重新連結</button>`:''}<button class="btn" data-act="driveDisconnect">中斷連結</button></div>
+      ${D.driveAuth?`<p class="sub" style="margin-top:6px">這個分頁還沒有登入憑證（重新整理或超過約 1 小時就要再按一次）。修改都先存在這個瀏覽器，不會遺失。</p>`:''}`
+    :`<div class="gdcard"><div class="gdinfo"><b>用 Google 帳號連結</b><span>會開啟 Google 的登入視窗。MyMind 只能存取<b>它自己建立的檔案</b>（drive.file 權限），看不到你雲端硬碟裡的其他東西。</span></div><button class="btn primary gdbtn" data-act="driveConnect"${D.driveBusy?' aria-busy="true" disabled':''}>${I('cloud')}${D.driveBusy?'連結中…':'連結 Google 雲端硬碟'}</button></div>
+      <details class="gdhelp"><summary>看到「Google 尚未驗證這個應用程式」？</summary><p>MyMind 還在 Google 的「測試」階段，所以會出現這個提醒。確認網址是 <code>accounts.google.com</code> 後，按「繼續」（或「進階」→「前往 hctsaik.github.io」），再勾選「查看、編輯、建立及刪除這個應用程式所使用的 Google 雲端硬碟檔案」。</p></details>`;
+  const where=`<section class="setsec"><h4 id="bk-h">同步到哪裡</h4><p class="sub">一次只用一個雲端。切換後，這個瀏覽器裡的圖會在下次同步時上傳到新的地方；原本那邊的資料不會被刪除。</p>
+    <div class="choices2 bkopts" role="radiogroup" aria-labelledby="bk-h">${bradio('drive','cloud','Google 雲端硬碟','用 Google 帳號登入；不用金鑰')}${bradio('github','git','GitHub','私人儲存庫；每次同步 1 個 commit')}</div>
+    ${drv?driveCard:`<p class="sub" style="margin-top:8px">${hasPat?`已設定金鑰 · <code>${esc(p.repo)}</code>`:'還沒有金鑰'} · <button class="linkbtn" data-act="setTab" data-v="gh">GitHub 與 AI 設定</button></p>`}
+    ${D.driveErr?`<div class="alert err" role="alert" style="margin-top:10px">${I('alert')}<div>${esc(D.driveErr)}</div></div>`:''}</section>`;
   const radio=(v,t,sub)=>`<button class="radio" role="radio" data-act="formSync" data-v="${v}" aria-checked="${mode===v}"><span class="dot"></span><div><b>${t}</b><span>${sub}</span></div></button>`;
-  const dataTab=`<section class="setsec"><h4 id="sm-h">同步方式</h4><p class="sub">圖一律先存在這個瀏覽器（IndexedDB）。GitHub 是選用的備份與同步。</p>
+  const dataTab=`${where}<section class="setsec"><h4 id="sm-h">同步方式</h4><p class="sub">圖一律先存在這個瀏覽器（IndexedDB）。雲端同步是選用的。</p>
     <div class="choices2 syncopts" role="radiogroup" aria-labelledby="sm-h">
-     ${radio('local','只存瀏覽器','不連網路、不會產生 commit。換裝置或清除網站資料前請先匯出備份。')}
-     ${radio('manual','手動同步到 GitHub','修改先存本機；按「同步」或 Ctrl+S 時，所有未同步的圖一起寫成 1 個 commit。')}
-     ${radio('auto','自動同步','有修改時最多每 3 分鐘同步一次，切換分頁或關閉時也會同步；每次 1 個 commit。')}
-    </div>${mode!=='local'&&!hasPat?`<div class="alert warn" role="note" style="margin-top:10px">${I('info')}<div>需要 GitHub 金鑰：到「GitHub 與 AI」分頁貼上金鑰。</div></div>`:''}</section>
+     ${radio('local','只存瀏覽器','不連網路。換裝置或清除網站資料前請先匯出備份。')}
+     ${radio('manual',`手動同步到 ${bn}`,drv?'修改先存本機；按「同步」或 Ctrl+S 時，所有未同步的圖一起上傳。':'修改先存本機；按「同步」或 Ctrl+S 時，所有未同步的圖一起寫成 1 個 commit。')}
+     ${radio('auto','自動同步',drv?'有修改時最多每 3 分鐘上傳一次，切換分頁或關閉時也會同步。':'有修改時最多每 3 分鐘同步一次，切換分頁或關閉時也會同步；每次 1 個 commit。')}
+    </div>${mode!=='local'&&!drv&&!hasPat?`<div class="alert warn" role="note" style="margin-top:10px">${I('info')}<div>需要 GitHub 金鑰：到「GitHub 與 AI」分頁貼上金鑰。</div></div>`:mode!=='local'&&drv&&!(dv&&dv.email)?`<div class="alert warn" role="note" style="margin-top:10px">${I('info')}<div>先按上面的「連結 Google 雲端硬碟」。</div></div>`:''}</section>
    <section class="setsec"><h4>瀏覽器儲存</h4>
     <div class="warnbox" role="note">${I('info')}<div>圖存在<b>這個瀏覽器</b>裡。清除瀏覽資料、網站資料，或使用無痕視窗時，圖可能會被刪除；換電腦或換瀏覽器也看不到。請定期匯出備份。</div></div>
     <ul class="kv">
@@ -216,7 +230,7 @@ export function settingsDialog(S,D){ const a11y=D.tab==='a11y', data=D.tab==='da
    <section class="setsec"><h4 id="ui-h">介面</h4><div class="seg" role="group" aria-labelledby="ui-h">${[['light','淺色'],['dark','深色'],['system','跟隨系統']].map(([v,n])=>`<button data-act="formUi" data-v="${v}" aria-pressed="${p.ui===v}">${n}</button>`).join('')}</div></section>
    <section class="setsec setrow"><div><h4 id="rm-h">減少動態效果</h4><p class="sub">關掉節點展開、面板滑入的動畫</p></div><button class="toggle" role="switch" data-act="formMotion" aria-checked="${!!p.reduceMotion}" aria-labelledby="rm-h"><i></i></button></section>`;
   return `<div class="scrim" data-act="scrim"><div class="modal settings" role="dialog" aria-modal="true" aria-labelledby="set-h">
-   <div class="mhead"><div class="spark" style="background:linear-gradient(135deg,#1F2329,#3F51E8)" aria-hidden="true">${I(a11y?'palette':data?'laptop':'git')}</div><div><h3 id="set-h">設定</h3><p>${a11y?'外觀與無障礙 · 只存在這個瀏覽器':data?'圖先存在這個瀏覽器；GitHub 同步是選用的':'連接 GitHub：大約 2 分鐘，只要做一次'}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
+   <div class="mhead"><div class="spark" style="background:linear-gradient(135deg,#1F2329,#3F51E8)" aria-hidden="true">${I(a11y?'palette':data?'laptop':'git')}</div><div><h3 id="set-h">設定</h3><p>${a11y?'外觀與無障礙 · 只存在這個瀏覽器':data?'圖先存在這個瀏覽器；雲端同步是選用的':'連接 GitHub：大約 2 分鐘，只要做一次'}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
    <div class="tabs settabs" role="tablist" aria-label="設定分頁"><button role="tab" id="st-data" data-act="setTab" data-v="data" aria-selected="${data}" aria-controls="sp-data" tabindex="${data?0:-1}">${I('laptop')}儲存與同步</button><button role="tab" id="st-gh" data-act="setTab" data-v="gh" aria-selected="${!a11y&&!data}" aria-controls="sp-gh" tabindex="${!a11y&&!data?0:-1}">${I('git')}GitHub 與 AI</button><button role="tab" id="st-a11y" data-act="setTab" data-v="a11y" aria-selected="${a11y}" aria-controls="sp-a11y" tabindex="${a11y?0:-1}">${I('palette')}外觀與無障礙</button></div>
    <div class="mbody" id="sp-data" role="tabpanel" aria-labelledby="st-data"${data?'':' hidden'}>${data?dataTab:''}</div>
    <div class="mbody" id="sp-gh" role="tabpanel" aria-labelledby="st-gh"${a11y||data?' hidden':''}>${a11y||data?'':(D.syncErr?`<div class="alert err" role="alert" style="margin-bottom:12px">${I('alert')}<div>${esc(D.syncErr)}</div></div>`:'')+gh}</div>
@@ -252,7 +266,7 @@ export function conflictDialog(C){ const d1=C.mineDiff,d2=C.theirsDiff;
    <div class="mbody">
     <div class="versions">
      <div class="ver"><div class="thumb" style="background-color:${C.canvas}">${C.mineSvg}</div><div class="vi"><b>我的版本（這台裝置）</b>新增 ${d1.add}、修改 ${d1.mod}、刪除 ${d1.del}</div></div>
-     <div class="ver"><div class="thumb" style="background-color:${C.canvas}">${C.theirsSvg}</div><div class="vi"><b>雲端版本 <code>${esc((C.sha||'').slice(0,7))}</code></b>新增 ${d2.add}、修改 ${d2.mod}、刪除 ${d2.del}</div></div>
+     <div class="ver"><div class="thumb" style="background-color:${C.canvas}">${C.theirsSvg}</div><div class="vi"><b>雲端版本 <code>${esc(String(C.sha||'').includes('@')?'v'+String(C.sha).split('@')[1]:(C.sha||'').slice(0,7))}</code></b>新增 ${d2.add}、修改 ${d2.mod}、刪除 ${d2.del}</div></div>
     </div>
     <div class="choices2" role="radiogroup" aria-label="處理方式">
      ${[['merge','合併兩邊（建議）','改到不同節點會自動合併；同一個節點兩邊都改時保留我的。合併後存成新版本。'],['mine','保留我的版本','覆蓋雲端版本；雲端版本仍可從版本歷史救回。'],['theirs','改用雲端版本','我的修改另存成「'+esc(C.title)+'（我的副本）」。']].map(([v,b,s])=>`<button class="radio" role="radio" data-act="cfPick" data-v="${v}" aria-checked="${C.pick===v}"><span class="dot"></span><div><b>${b}</b><span>${s}</span></div></button>`).join('')}
