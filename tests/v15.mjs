@@ -15,6 +15,18 @@ const W=ms=>new Promise(r=>setTimeout(r,ms));
   const m=merge3(base,mine,theirs).doc.root;
   ok('merge3: line added on my side kept, line deleted on their side stays deleted',JSON.stringify(m.rels)===JSON.stringify([{id:'y',a:'b',b:'c',label:'mine'}]),JSON.stringify(m.rels));
   ok('merge3: v1.4 fields (tags, colour) survive a merge',JSON.stringify(m.c[0].tags)==='["t1"]'&&m.c[1].color===2,JSON.stringify(m.c)); }
+{ // theme relationship colours: own colour, ≥3:1 on its canvas (and white/蜜桃 for light themes), and 商務 distinct from every branch under protanopia/deuteranopia (ΔE76 ≥ 5)
+  const {THEMES,cr}=await import('../js/core.js');
+  const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255), lin=c=>c<=0.04045?c/12.92:((c+0.055)/1.055)**2.4;
+  const MP=[[0.152286,1.052583,-0.204868],[0.114503,0.786281,0.099216],[-0.003882,-0.048116,1.051998]], MD=[[0.367322,0.860646,-0.227968],[0.280085,0.672501,0.047413],[-0.011820,0.042940,0.968881]];
+  const sim=(h,M)=>{const l=hex(h).map(lin);return M?M.map(r=>Math.min(1,Math.max(0,r[0]*l[0]+r[1]*l[1]+r[2]*l[2]))):l;};
+  const lab=l=>{const X=(0.4124*l[0]+0.3576*l[1]+0.1805*l[2])/0.95047,Y=0.2126*l[0]+0.7152*l[1]+0.0722*l[2],Z=(0.0193*l[0]+0.1192*l[1]+0.9505*l[2])/1.08883;const f=t=>t>0.008856?Math.cbrt(t):7.787*t+16/116;return [116*f(Y)-16,500*(f(X)-f(Y)),200*(f(Y)-f(Z))];};
+  const dE=(a,b,M)=>{const x=lab(sim(a,M)),y=lab(sim(b,M));return Math.hypot(x[0]-y[0],x[1]-y[1],x[2]-y[2]);};
+  const bad=[]; for(const [k,t] of Object.entries(THEMES)){ if(!t.rel){bad.push(k+':none');continue;} const cv=t.canvas||'#FFFFFF', light=cr(cv,'#000000')>cr(cv,'#FFFFFF');
+    if(cr(t.rel,cv)<3) bad.push(k+':canvas'); if(light&&(cr(t.rel,'#FFFFFF')<3||cr(t.rel,'#FFF1E6')<3)) bad.push(k+':white/peach'); if(t.br.some(b=>b.toLowerCase()===t.rel.toLowerCase())) bad.push(k+':same as a branch'); }
+  ok('every theme has its own relationship colour with ≥3:1 contrast',!bad.length,bad.join(','));
+  const B=THEMES.business, worst=Math.min(...B.br.flatMap(b=>[dE(B.rel,b,MP),dE(B.rel,b,MD)]));
+  ok('商務 relationship colour stays distinct from every branch under protan/deutan simulation (ΔE76 ≥ 5)',worst>=5,B.rel+' worst ΔE '+worst.toFixed(1)); }
 const b=await chromium.launch({executablePath:exe});
 const doc={format:'mymind/1',id:'t15',theme:'coral',settings:{},icon:'🧠',created:'2026-11-01T00:00:00Z',updated:'2026-11-20T00:00:00Z',
   root:{id:'r',t:'產品發表會',c:[{id:'a',t:'場地',c:[{id:'a1',t:'信義區展演廳'}]},{id:'b',t:'講者'},{id:'c',t:'媒體邀請'},{id:'d',t:'預算'},{id:'e',t:'贈品'}]}};
@@ -116,6 +128,8 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':''; const sfx=mobi
   await shot('07-rel-pick');
   { const ov=await p.evaluate(()=>{ document.body.insertAdjacentHTML('beforeend','<div class="toast on" id="tt" role="status">已產生新圖「日本旅遊計畫」</div>'); const t=document.getElementById('tt').getBoundingClientRect(), b=document.getElementById('relbar').getBoundingClientRect(); document.getElementById('tt').remove(); return !(t.right<=b.left||t.left>=b.right||t.bottom<=b.top||t.top>=b.bottom); });
     ok(T+'rel pick bar: a toast never covers the instruction bar',!ov); }
+  if(mobile){ const tb=await p.evaluate(()=>{ document.body.insertAdjacentHTML('beforeend','<div class="toast on" id="tt" role="status">測試</div>'); const t=document.getElementById('tt').getBoundingClientRect(); const bs=[...document.querySelectorAll('.top button, .top .rb')].filter(b=>b.offsetParent).map(b=>b.getBoundingClientRect().bottom); document.getElementById('tt').remove(); return {top:t.top,btn:Math.max(...bs)}; });
+    ok(T+'rel pick: the top toast sits below the round toolbar buttons',tb.top>=tb.btn,JSON.stringify(tb)); }
   await tap(await center('e')); r=await R();
   ok(T+'rel: tapping the target creates a line stored in the map',r.rels&&r.rels.length===1&&r.rels[0].a==='b'&&r.rels[0].b==='e',JSON.stringify(r.rels));
   const relSvg=await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.rel'); const v=g&&g.querySelector('path[data-g=rel]'); return v?{dash:v.getAttribute('stroke-dasharray'),marker:v.getAttribute('marker-end'),d:v.getAttribute('d'),label:g.getAttribute('aria-label')}:null; });
@@ -136,8 +150,15 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':''; const sfx=mobi
     const {cr}=await import('../js/core.js');
     ok(T+'unselected relationship line uses its own colour (not the tree line colour), ≥3:1 on white and on 蜜桃 canvas',cc.rel&&cc.tree&&cc.rel.toLowerCase()!==cc.tree.toLowerCase()&&cr(cc.rel,'#FFFFFF')>=3&&cr(cc.rel,'#FFF1E6')>=3,JSON.stringify(cc)); }
   await shot('09-rel-label');
+  { // left edge: pan until the label would be cut 24px off the left side → it is pushed back inside (8px)
+    const lb0=await p.evaluate(()=>{ const b=document.querySelector('#mapsvg g.rellbl rect').getBoundingClientRect(), st=document.getElementById('stage').getBoundingClientRect(); return b.left-st.left; });
+    const panBy=d=>p.evaluate(d=>{ const st=document.getElementById('stage'), r=st.getBoundingClientRect(); st.dispatchEvent(new WheelEvent('wheel',{deltaX:d,deltaY:0,clientX:r.left+r.width/2,clientY:r.top+r.height/2,bubbles:true,cancelable:true})); },d); const raw=()=>p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.rellbl'), st=document.getElementById('stage').getBoundingClientRect(), b=g.getBoundingClientRect(), m=/translate\(([-\d.]+)/.exec(g.getAttribute('transform')||''); return b.left-st.left-(m?parseFloat(m[1])*window.__mm.vp.sc:0); });
+    let dx=0; for(let k=0;k<6;k++){ const u=await raw(); if(u<=-18) break; const d=u+24; dx+=d; await panBy(d); await W(200); } await W(150);
+    const lb=await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.rellbl'), b=g.getBoundingClientRect(), st=document.getElementById('stage').getBoundingClientRect(); return {l:b.left-st.left,t:g.getAttribute('transform')}; });
+    ok(T+'rel label at the LEFT edge is pushed back inside (≥8px)',lb.l>=7.5&&lb.l<=30&&!!lb.t,JSON.stringify({lb0,...lb}));
+    await shot('09b-rel-label-left-edge'); await panBy(-dx); await W(300); }
   // flip
-  await tap(mid); await W(300); await hclick('.relmenu [data-act="relFlip"]'); r=await R(); ok(T+'rel: flip swaps the arrow',r.rels[0].a==='e'&&r.rels[0].b==='b');
+  await tap(mid); await W(300); ok(T+'line menu shows the full label text (touch has no hover tooltip)',/同一位負責人/.test(await p.locator('.relmenu .rellblfull').textContent().catch(()=>''))); await hclick('.relmenu [data-act="relFlip"]'); r=await R(); ok(T+'rel: flip swaps the arrow',r.rels[0].a==='e'&&r.rels[0].b==='b');
   await undoToast();
   // layouts
   for(const lay of ['balanced','org','right']){ await p.evaluate(l=>{ const m=window.__mm; m.doc.settings=m.doc.settings||{}; m.doc.settings.layout=l; window.__mmStore.changed(); },lay); await hclick('[data-act="fit"]').catch(()=>{}); await W(300);

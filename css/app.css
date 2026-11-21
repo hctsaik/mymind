@@ -842,6 +842,7 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .relbar .short{display:none}
 .relbar b{font-weight:700}
 .relbar .btn{flex:none;height:32px}
+.relmenu .rellblfull{font-size:13px;font-weight:600;color:var(--text);padding:0 10px 6px;max-width:260px;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
 .relmenu .lphead{font-size:12px;color:var(--text-2);padding:6px 10px 4px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .olrels{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 12px;border-radius:var(--r-md);background:var(--accent-soft);color:var(--text);font-size:13px}
 .olrels .i{width:16px;height:16px;color:var(--accent);flex:none}
@@ -875,7 +876,8 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
  /* toasts move above the sheet's footer while a dialog is open, so they never cover choices */
  body:has(#layer .dlg) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))}
  /* r3: also while a side panel (history, style, note) is open, so the toast never covers its list */
- body:has(#panelHost:not(:empty)) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))}
+ body:has(#panelHost:not(:empty)) .toast{bottom:auto;top:calc(76px + env(safe-area-inset-top))}
+ /* r2: below the round top buttons so they stay reachable (dialogs keep 12px: the toolbar is behind the scrim then) */
 }
 /* v1.3.2 hotfix: floating bar over the selected node on phones (✏️ 編輯 opens the keyboard) */
 .nodetb{display:none}
@@ -886,4 +888,4 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 }
 
 /* v1.5 review: on phones the toast moves to the top while the relationship pick bar is showing, so it never covers the instructions or 取消 */
-@media (max-width:768px){ body:has(#relbar) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))} }
+@media (max-width:768px){ body:has(#relbar) .toast{bottom:auto;top:calc(76px + env(safe-area-inset-top))} }

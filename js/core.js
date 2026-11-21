@@ -37,7 +37,7 @@ export const THEMES={
  vivid:{rel:'#334155',name:'繽紛',root:'#FFD54F',rootText:'#3A2E00',br:['#3B82F6','#F97316','#EAB308','#22C55E','#14B8A6','#8B5CF6','#EC4899','#EF4444','#0EA5E9','#84CC16'],l1:'pill',deepBox:true,edge:'bracket',text:'#1F2329',canvas:'#F3F7FC',dot:'#DCE4EF',hl:'#FFF0A0'},
  fresh:{rel:'#334155',name:'清新',root:'#3F51E8',rootText:'#FFFFFF',br:['#5B6CFF','#18B07B','#F59E0B','#EF5B5B','#8B5CF6','#06B6D4'],l1:'tint',text:'#1F2329',canvas:'#F5F6F8',dot:'#D5D9DF'},
  macaron:{rel:'#6D28D9',name:'馬卡龍',root:'#FF7A9A',rootText:'#3A2E39',br:['#FF9EB5','#7FD8BE','#FFD166','#8EC5FF','#C3A6FF','#FFB38A'],l1:'solid',text:'#3A2E39',canvas:'#FFF8F5',dot:'#F1DCD5'},
- business:{rel:'#9D174D',name:'商務',root:'#1F3A5F',rootText:'#FFFFFF',br:['#3D5A80','#2A9D8F','#E76F51','#5C677D','#264653','#C08A2D'],l1:'outline',text:'#1F2937',canvas:'#F4F6F9',dot:'#D6DCE4'},
+ business:{rel:'#9333EA',name:'商務',root:'#1F3A5F',rootText:'#FFFFFF',br:['#3D5A80','#2A9D8F','#E76F51','#5C677D','#264653','#C08A2D'],l1:'outline',text:'#1F2937',canvas:'#F4F6F9',dot:'#D6DCE4'},
  forest:{rel:'#6D28D9',name:'森林',root:'#2D6A4F',rootText:'#FFFFFF',br:['#40916C','#2F9E8F','#7A9E3D','#B5838D','#6D8B74','#C9A227'],l1:'tint',text:'#1E2B24',canvas:'#F3F7F2',dot:'#D3DFD2'},
  midnight:{rel:'#F0ABFC',name:'夜幕',root:'#7C8CFF',rootText:'#0E1020',br:['#7C8CFF','#3DDC97','#FFC857','#FF6B8B','#B794F6','#4FD1C5'],l1:'tintDark',text:'#E8EAF0',canvas:'#121418',dot:'#2A2E37',dark:true},
  minimal:{rel:'#0F7B8A',name:'極簡',root:'#111111',rootText:'#FFFFFF',br:['#111111','#3A3A3A','#111111','#3A3A3A','#111111','#3A3A3A'],l1:'outline',text:'#111111',canvas:'#FFFFFF',dot:'#E5E5E5'}
