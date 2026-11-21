@@ -204,7 +204,7 @@ svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stro
 .mhead p{font-size:12.5px;color:var(--text-3);text-wrap:pretty}
 .mhead .close{margin-left:auto;align-self:flex-start}
 .mbody{padding:12px 20px 8px;overflow:auto;flex:1;min-height:0}
-.aitabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+.aitabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
 .aitab{border:1.5px solid var(--border);border-radius:var(--r-md);padding:10px 10px;text-align:left;font-size:12px;color:var(--text-2);line-height:1.4}
 .aitab b{display:block;font-size:13px;color:var(--text);margin-bottom:2px}
 .aitab[aria-selected=true]{border-color:var(--ai);background:var(--ai-soft)}
@@ -786,9 +786,68 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .syncbtn.reauth{border-color:#B45309;color:var(--warn-text);background:var(--warn-bg)}
 [data-ui=dark] .syncbtn.reauth{color:#FCD34D;border-color:#B7791F}
 @media (max-width:768px){.gdcard .btn{height:44px;flex:1 1 auto}.gdhelp summary{min-height:44px}}
-/* phone editor top bar with the sync button too (6 round buttons): keep the title pill readable */
+/* ---------- v1.5: phone top bar keeps a readable title; sync state rides on the ⋯ button ---------- */
 @media (max-width:768px){
- .top.flt:has(.syncbtn:not([hidden])) .right-actions{gap:4px}
- .top.flt:has(.syncbtn:not([hidden])) .right-actions .rb,.top.flt .syncbtn:not([hidden]){width:44px;height:44px;min-width:44px;padding:0;justify-content:center}
- .top.flt:has(.syncbtn:not([hidden])) .backpill{max-width:calc(100vw - 16px - 6px - 6*44px - 5*4px);padding:0 10px 0 6px}
+ .top.flt .right-actions .syncbtn{display:none}
+ .top.flt .backpill{min-width:112px}
+ .rb.more{position:relative}
+ .rb.more .nbadge{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:11.5px;font-weight:700;display:inline-grid;place-items:center}
+ .rb.more .nbadge.warn{background:#B45309;color:#FFFFFF}
+ .rb.more.warn{box-shadow:0 0 0 2px #B45309,0 2px 8px rgba(31,35,41,.14)}
+}
+.ctx button.hasit{color:var(--accent);font-weight:600}
+.ctx button.warnit{color:var(--warn-text);background:var(--warn-bg);font-weight:600}
+/* ---------- v1.5 AI assistant ---------- */
+.aimodal{width:min(640px,100%)}
+.aitab .sub{display:block}
+.aitab:disabled{opacity:.6;cursor:default}
+.aicount{font-size:12px;color:var(--text-3);text-align:right;margin:4px 2px 8px}
+.aicount.over{color:var(--warn-text);font-weight:600}
+.airadios{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px}
+.airadio{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-size:13px;color:var(--text);cursor:pointer}
+.airadio input{width:16px;height:16px;accent-color:var(--ai);margin:0}
+.airadio:has(input:checked){border-color:var(--ai);background:var(--ai-soft)}
+.airadio.dis{opacity:.6;cursor:not-allowed}
+.aimodel{font-size:12px;color:var(--text-3);margin:6px 2px 0}
+.aires h4{display:flex;align-items:center;gap:6px;font-size:14px;margin:0 0 4px}
+.aires h4 .i{width:16px;height:16px;color:var(--ok)}
+.aistat{font-size:13px;color:var(--text-2);margin:0 0 10px}
+.difftree{list-style:none;margin:0;padding:8px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--panel-2);max-height:min(46vh,380px);overflow:auto}
+.difftree .dr{display:flex;align-items:flex-start;gap:8px;padding:5px 8px 5px calc(8px + var(--d)*18px);border-radius:6px;font-size:13px;line-height:1.5;color:var(--text)}
+.difftree .dr.m-ctx{color:var(--text-2)}
+.difftree .dr.m-ctx .dt{font-weight:600}
+.difftree .dr.more .dt{color:var(--text-3);font-style:italic}
+.difftree .dm{flex:none;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;border:1px solid currentColor;line-height:1.5}
+.difftree .m-new{background:var(--ok-bg)} .difftree .m-new .dm{color:var(--ok)}
+.difftree .m-moved .dm{color:var(--accent)}
+.difftree .m-group{background:var(--accent-soft)} .difftree .m-group .dm{color:var(--accent)} .difftree .m-group .dt{font-weight:700}
+.difftree .m-note{background:var(--warn-bg)} .difftree .m-note .dm{color:var(--warn-text)}
+.aiundo{margin-top:8px}
+@media (max-width:768px){
+ .aitabs{grid-template-columns:repeat(3,1fr)}
+ .aitab{min-height:48px;padding:8px}
+ .aitab .sub{display:none}
+ .airadio{min-height:44px;flex:1 1 100%}
+ .aimodal .mfoot{flex-wrap:wrap}
+ .aimodal .mfoot .info{flex:1 1 100%}
+ .aimodal .mfoot .btn{flex:1 1 0;justify-content:center;min-height:44px}
+}
+/* ---------- v1.5 relationship lines ---------- */
+#vp g.rel{cursor:pointer}
+#vp g.rel:hover path[data-g=rel]{stroke-width:2.6}
+.relbar{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 6px 6px 14px;background:var(--panel);color:var(--text);border:1.5px solid var(--accent);border-radius:999px;box-shadow:var(--shadow-2);font-size:13px}
+.relbar .i{width:18px;height:18px;color:var(--accent);flex:none}
+.relbar .rbt{min-width:0}
+.relbar .long{margin-left:6px;color:var(--text-2)}
+.relbar .short{display:none}
+.relbar b{font-weight:700}
+.relbar .btn{flex:none;height:32px}
+.relmenu .lphead{font-size:12px;color:var(--text-2);padding:6px 10px 4px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.olrels{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 12px;border-radius:var(--r-md);background:var(--accent-soft);color:var(--text);font-size:13px}
+.olrels .i{width:16px;height:16px;color:var(--accent);flex:none}
+@media (max-width:768px){
+ .relbar{top:auto;bottom:calc(84px + env(safe-area-inset-bottom));padding:6px 6px 6px 12px}
+ .relbar .long{display:none} .relbar .short{display:inline;margin-left:4px;color:var(--text-2)}
+ .relbar .btn{height:44px;min-width:64px}
+ .relmenu button{height:44px}
 }

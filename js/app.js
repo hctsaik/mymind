@@ -1,6 +1,6 @@
 // MyMind app: state, routing, editor interactions, sync. Plain ES modules, no build step.
 import { I, esc, THEMES, DEFAULT_THEME, readable, lum, cr, mix } from './core.js';
-import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf } from './mapview.js';
+import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf, relsOf } from './mapview.js';
 import { prefs, secrets, maps, newId, storage } from './store.js';
 import { client, GitHubError, blobSha } from './github.js';
 import * as GD from './gdrive.js';
@@ -35,7 +35,9 @@ function storeDoc(doc,{dirty=true}={}){ maps.save(doc.id,doc); maps.setMeta(doc.
 function createMap(root,{open=true,theme}={}){ const doc=newDoc(root,theme); storeDoc(doc); changed(); askPersist(); if(open) location.hash='#/map/'+doc.id; return doc; }
 // ---------- mutations / undo ----------
 function mutate(fn,{select,keepRedo}={}){ if(!S.doc||S.preview) return; S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>200)S.undo.shift(); if(!keepRedo)S.redo=[];
-  fn(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
+  fn(S.doc.root); pruneRels(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
+// relationship lines whose ends no longer exist are dropped with the same undo step that removed the node
+function pruneRels(r){ if(!r.rels) return; const ids=new Set(allDeep(r).map(n=>n.id)); r.rels=r.rels.filter(x=>x&&x.a!==x.b&&ids.has(x.a)&&ids.has(x.b)); if(!r.rels.length) delete r.rels; }
 function touch(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=remote()?'dirty':'saved'; changed(); drawAll(); }
 function undo(){ if(!S.undo.length) return toast('沒有可以復原的動作'); S.redo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.undo.pop()); if(S.sel&&!find(S.doc.root,S.sel)) S.sel=S.doc.root.id; touch(); }
 function redo(){ if(!S.redo.length) return toast('沒有可以重做的動作'); S.undo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.redo.pop()); touch(); }
@@ -111,8 +113,8 @@ function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const
   if(!S.vp||first&&!S.vp) S.vp=initialView(lay.r); if(first&&S.vpFor!==S.mapId){S.vp=initialView(lay.r);S.vpFor=S.mapId;}
   const lod=S.vp.sc<.45&&all(lay.r).length>60;
   if(S.find){ S.find.hits=findHits(); if(S.find.i>=S.find.hits.length) S.find.i=0; }
-  const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod});
-  vp.innerHTML=svg; S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
+  const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod,selRel:S.selRel});
+  vp.innerHTML=svg; updRelBar(); S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
   $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
 function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; positionEditor(); updateMinimapVp(); }
 function drawOverview(lod){ const o=$('#ovl'); if(!o) return; o.querySelectorAll('.ovchip').forEach(e=>e.remove()); if(!lod) return; const T=th(), {tx,ty,sc}=S.vp;
@@ -181,7 +183,7 @@ function centerOn(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) 
 function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits.length){ updateFindCount(); drawMap(); return; } F.i=((i%F.hits.length)+F.hits.length)%F.hits.length; const id=F.hits[F.i];
   if(!S.preview){ let p=find(S.doc.root,id), opened=false; while(p&&p.parent){ if(p.parent.collapsed){ delete p.parent.collapsed; opened=true; } p=find(S.doc.root,p.parent.id); } if(opened) touch(); S.sel=id; }
   drawAll(); centerOn(id); updateFindCount(); }
-function select(id,{scroll=true}={}){ S.sel=id; drawAll(); if(scroll) ensureVisible(id); }
+function select(id,{scroll=true}={}){ S.sel=id; S.selRel=null; drawAll(); if(scroll) ensureVisible(id); }
 // ---------- inline edit ----------
 function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
   S.editing={id,isNew,orig:find(S.doc.root,id).n.t}; ensureVisible(id); const o=$('#ovl'); o.querySelector('.editbox')?.remove();
@@ -205,24 +207,27 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
   st.addEventListener('pointerdown',e=>{ if(e.target.closest('.editbox')||e.button===2) return; st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
     if(pts.size===2){ const [a,b]=[...pts.values()]; pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),c:[(a[0]+b[0])/2,(a[1]+b[1])/2]}; pan=null; drag=null; clearTimeout(lp); return; }
     const id=nodeAt(e), [x,y]=stagePoint(e);
+    const relEl=!S.relPick&&!S.preview&&e.target.closest&&e.target.closest('g.rel');
+    if(relEl&&!id||relEl&&relEl.classList.contains('rellbl')){ e.preventDefault(); pts.delete(e.pointerId); relClick(relEl.dataset.rel,e.clientX,e.clientY); return; }
     if(e.target.closest('.handle')){ e.preventDefault(); addChild(); return; }
     if(e.target.closest('.cc')){ e.preventDefault(); toggleCollapse(id); return; }
-    if(id){ drag={id,x0:x,y0:y,moved:false,link:!!e.target.closest('[data-link]')}; if(e.pointerType!=='mouse') lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); if(MENU) MENU.lp=true; } },520); }
+    if(id){ drag={id,x0:x,y0:y,moved:false,link:!!e.target.closest('[data-link]')}; if(e.pointerType!=='mouse'&&!S.relPick) lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); if(MENU) MENU.lp=true; } },520); }
     else pan={x0:x,y0:y,tx:S.vp.tx,ty:S.vp.ty,moved:false}; });
   st.addEventListener('pointermove',e=>{ if(!pts.has(e.pointerId)) return; pts.set(e.pointerId,stagePoint(e)); const [x,y]=stagePoint(e);
     if(pinch&&pts.size===2){ const [a,b]=[...pts.values()]; const d=Math.hypot(a[0]-b[0],a[1]-b[1]); const c=[(a[0]+b[0])/2,(a[1]+b[1])/2]; const f=d/pinch.d; const v=S.vp, ns=Math.max(.15,Math.min(3,v.sc*f)), k=ns/v.sc; S.vp={sc:ns,tx:c[0]-(pinch.c[0]-v.tx)*k,ty:c[1]-(pinch.c[1]-v.ty)*k}; pinch={d,c}; applyVp(); return; }
     if(pan){ if(Math.hypot(x-pan.x0,y-pan.y0)>3) pan.moved=true; S.vp={...S.vp,tx:pan.tx+x-pan.x0,ty:pan.ty+y-pan.y0}; applyVp(); }
-    else if(drag){ if(!drag.moved&&Math.hypot(x-drag.x0,y-drag.y0)>6){ drag.moved=true; clearTimeout(lp); if(drag.id===S.doc.root.id||S.preview){drag=null;return;} st.classList.add('dragging'); }
+    else if(drag){ if(S.relPick) return; if(!drag.moved&&Math.hypot(x-drag.x0,y-drag.y0)>6){ drag.moved=true; clearTimeout(lp); if(drag.id===S.doc.root.id||S.preview){drag=null;return;} st.classList.add('dragging'); }
       if(drag&&drag.moved){ const [wx,wy]=worldAt(x,y); let t=null; for(const n of lay.by.values()){ if(n.id!==drag.id&&n.x!==undefined&&Math.abs(wx-n.x)<=n.w/2+6&&Math.abs(wy-n.y)<=n.h/2+6){t=n;break;} }
         const where=t?(wy<t.y-t.h/4&&t.d>0?'before':wy>t.y+t.h/4&&t.d>0?'after':'child'):null; drag.t=t&&t.id; drag.where=where; if(S.drop!==drag.t){S.drop=drag.t; drawMap();} showGhost(x,y,drag); } } });
   const end=e=>{ if(!pts.has(e.pointerId)) return; pts.delete(e.pointerId); clearTimeout(lp); if(pts.size<2&&pinch){ pinch=null; drawMap(); return; }
-    if(pan){ if(!pan.moved&&!e.target.closest('g.node')){ /* click on empty canvas */ } if(pan.moved) drawMap(); pan=null; }
+    if(pan){ if(!pan.moved&&!e.target.closest('g.node')){ /* click on empty canvas */ } if(!pan.moved&&S.selRel){ S.selRel=null; drawMap(); } if(pan.moved) drawMap(); pan=null; }
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
+      else if(S.relPick){ relPickTo(d.id); }
       else if(d.link){ if(S.editing) commitEdit(); select(d.id,{scroll:false}); openDetails('link'); }
       else { if(S.editing) commitEdit(); if(S.sel===d.id&&e.detail>=2) startEdit(d.id); else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
-  st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
+  st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); const rl=!id&&e.target.closest&&e.target.closest('g.rel'); if(rl){ e.preventDefault(); relClick(rl.dataset.rel,e.clientX,e.clientY); return; } if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
   st.addEventListener('wheel',e=>{ e.preventDefault(); const [x,y]=stagePoint(e); if(e.ctrlKey||e.metaKey) zoomAt(Math.exp(-e.deltaY*.01),x,y); else { S.vp={...S.vp,tx:S.vp.tx-(e.shiftKey?e.deltaY:e.deltaX),ty:S.vp.ty-(e.shiftKey?0:e.deltaY)}; applyVp(); } },{passive:false});
   const ai=$('#aibar'); if(ai){ const q=$('#aiq'), sb=ai.querySelector('.send'); q.addEventListener('input',()=>sb.disabled=!q.value.trim()); ai.addEventListener('submit',e=>{e.preventDefault(); if(q.value.trim()) aiFromBar(q.value.trim());}); } }
 function showGhost(x,y,d){ let g=$('#ghost'); const n=lay.by.get(d.id); if(!g){g=document.createElement('div');g.id='ghost';g.className='dragghost';$('#ovl').appendChild(g);} g.textContent=(n?n.t:'')+(d.t?(d.where==='child'?' → 成為子節點':d.where==='before'?' → 放到上方':' → 放到下方'):''); g.style.left=(x+14)+'px'; g.style.top=(y+10)+'px'; }
@@ -243,6 +248,8 @@ function navigate(key){ const f=selInfo(); if(!f) return select(S.doc.root.id); 
     if(f.parent){ const j=f.idx+(key==='ArrowUp'?-1:1); if(j>=0&&j<f.parent.c.length) return select(f.parent.c[j].id); }
     const cand=[...lay.by.values()].filter(m=>m.x!==undefined&&m.d===n.d&&(key==='ArrowUp'?m.y<n.y:m.y>n.y)).sort((a,b)=>Math.abs(a.y-n.y)-Math.abs(b.y-n.y)); if(cand[0]) select(cand[0].id); } }
 function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c=e.ctrlKey||e.metaKey;
+  if(S.relPick){ if(k==='Enter'){ e.preventDefault(); return relPickTo(S.sel); } if(k==='Escape'){ e.preventDefault(); return relCancel(); } if(!/^Arrow/.test(k)) return; }
+  if(S.selRel&&!S.preview){ if(k==='Delete'||k==='Backspace'){ e.preventDefault(); return relDel(S.selRel); } if(k==='Enter'||k==='F2'){ e.preventDefault(); return relLabel(S.selRel); } if(k==='Escape'){ e.preventDefault(); S.selRel=null; return drawMap(); } }
   if(S.preview&&!['Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) return;
   if(k==='Tab'&&!c&&!e.altKey){ e.preventDefault(); e.shiftKey?outdent():addChild(); }
   else if(k==='Enter'&&!c){ e.preventDefault(); e.shiftKey?startEdit(S.sel):addSibling(); }
@@ -280,6 +287,7 @@ document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.m
   if(c&&e.key.toLowerCase()==='o'&&S.doc){ e.preventDefault(); act('outline'); return; }
   if(c&&e.altKey&&e.key.toLowerCase()==='m'&&S.doc){ e.preventDefault(); act('note'); return; }
   if(c&&e.key.toLowerCase()==='j'&&S.doc){ e.preventDefault(); act('aiExpand'); return; }
+  if(e.altKey&&!c&&e.key.toLowerCase()==='l'&&S.doc&&S.view==='editor'){ e.preventDefault(); act('relStart'); return; }
   if(e.altKey&&e.key.toLowerCase()==='y'&&S.doc){ e.preventDefault(); act('style'); return; }
   if(e.key==='F6'&&S.doc&&!isM()){ e.preventDefault(); act('randomTheme'); return; }
   if(e.key==='/'&&!c){ const s=$('#homeq')||$('#sideq'); if(s){e.preventDefault();s.focus();} return; }
@@ -299,13 +307,14 @@ function openMenu(html,trigger,pos){ closeMenu(); const L=$('#layer'); L.insertA
     else if(e.key==='Tab'){e.preventDefault();closeMenu(true);} }); }
 function closeMenu(restore){ if(!MENU) return false; const {el,trigger}=MENU; MENU=null; el.remove(); $('#layer .menuscrim')?.remove(); if(trigger){trigger.setAttribute('aria-expanded','false'); if(restore&&document.contains(trigger)) trigger.focus();} return true; }
 const mi=(act,icon,label,cls='',v='')=>`<button role="menuitem" tabindex="-1" data-act="${act}"${v!==''?` data-v="${esc(v)}"`:''}${cls?` class="${cls}"`:''}>${I(icon)}<span>${label}</span></button>`;
-function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],['aiExpand','spark','AI 擴充'],['delete','trash','刪除','del']];
+function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],['relStart','rel','關聯線'],...(relsOf(S.doc.root).some(r=>r.a===id||r.b===id)?[['relOf','rel','編輯關聯線']]:[]),['aiExpand','spark','AI 擴充'],...((n.c||[]).length>=3?[['aiRegroup','group','AI 重新分組']]:[]),['delete','trash','刪除','del']];
   openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c])=>mi(a,i,l,c||'')).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
 function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
-  openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">
+  const n=S.unsynced, syncIt=S.remote?mi('syncNow',S.driveAuth||S.sync.state==='error'?'alert':'cloud',S.driveAuth?'重新連結 Google 才能同步':S.sync.state==='saving'?'同步中…':n?`同步（${n} 項未同步）`:'已同步，再同步一次',S.driveAuth||S.sync.state==='error'?'warnit':n?'hasit':'')+'<hr>':'';
+  openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">${syncIt}
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
-  <hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
+  <hr>${mi('aiSummary','sum','AI 摘要整張圖')}${mi('aiArticle','note','文章轉心智圖（AI）')}${mi('relStart','rel','關聯線（從選取節點）')}<hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
   <hr>${S.canInstall?mi('install','download','安裝 App 到主畫面'):''}${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientRect();
   openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('exp','note','PDF（A4，符合頁面）','','pdf')}${mi('copyMd','copy','複製節點為 Markdown')}${mi('exp','outline','整張圖 Markdown（.md）','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}<hr>${mi('mdImport','paste','貼上／匯入 Markdown…')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
@@ -318,7 +327,7 @@ let lastFocus=null;
 function openDialog(D){ $('#toast')?.classList.remove('on'); if(!S.dialog) lastFocus=document.activeElement; S.dialog=D; drawDialog(true); }
 function closeDialog(){ if(!S.dialog) return; if(S.dialog.type==='ai'&&S.dialog.ctrl) S.dialog.ctrl.abort(); const D=S.dialog; S.dialog=null; drawDialog(); if(D.onClose) D.onClose(); if(lastFocus&&document.contains(lastFocus)) lastFocus.focus(); }
 function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove(); const D=S.dialog; if(!D) return; let html='';
-  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,D.tab==='expand'&&S.doc?(selInfo()||{n:S.doc.root}).n:null); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); } else if(D.type==='emoji'){ const n=S.doc&&find(S.doc.root,D.nodeId); html=V.emojiDialog(D,n&&n.n.icon,(prefs.get().recentIcons||[]).slice(0,12)); }
+  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,S.doc?(selInfo()||{n:S.doc.root}).n:null,S.doc&&S.doc.root); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); } else if(D.type==='emoji'){ const n=S.doc&&find(S.doc.root,D.nodeId); html=V.emojiDialog(D,n&&n.n.icon,(prefs.get().recentIcons||[]).slice(0,12)); }
   const w=document.createElement('div'); w.className='dlg'; w.innerHTML=html; L.appendChild(w);
   if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
 function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
@@ -328,21 +337,69 @@ function openSettings(tab='data',extra={}){ const p=prefs.get(); const D={type:'
 function askText(title,label,value,ok){ return new Promise(res=>openDialog({type:'prompt',title,label,input:value,ok:'確定',focus:'#pr-in',resolve:res,onClose:()=>res(null)})); }
 function confirmBox(title,sub,ok,danger){ return new Promise(res=>openDialog({type:'prompt',title,sub,ok,danger,resolve:res,onClose:()=>res(null)})); }
 // ---------- AI ----------
-function openAI(tab='topic',extra={}){ openDialog({type:'ai',tab,topic:'',notes:'',hint:'',depth:3,breadth:'4–6',...extra}); }
-async function runAI(){ const D=S.dialog; if(!D||D.type!=='ai'||D.busy) return; const key=secrets.openai(); const model=prefs.get().model;
-  ['topic','notes','hint'].forEach(k=>{const el=document.querySelector(`[data-ai="${k}"]`); if(el) D[k]=el.value;});
-  if(!key){ D.error={kind:'nokey'}; return drawDialog(); }
-  const f=S.doc?(selInfo()||{n:S.doc.root}):null;
-  if(D.tab==='expand'&&!f){ D.error={kind:'http',message:'先開一張圖並選一個節點'}; return drawDialog(); }
-  if(D.tab==='topic'&&!D.topic.trim()||D.tab==='notes'&&!D.notes.trim()){ toast('請先輸入內容'); return; }
-  D.busy=true; D.error=null; D.ctrl=new AbortController(); drawDialog();
-  try{ let tree;
-    if(D.tab==='expand'){ const path=[]; let x=find(S.doc.root,f.n.id); while(x){path.unshift(x.n.t); x=x.parent?find(S.doc.root,x.parent.id):null;}
-      tree=await AI.expand(key,model,{path,node:f.n.t,hint:D.hint},{signal:D.ctrl.signal}); const add=(tree.c||[]).map(c=>ensureIds(clone(c)));
-      S.dialog=null; drawDialog(); mutate(r=>{const n=find(r,f.n.id).n; n.c=(n.c||[]).concat(add); n.collapsed=false;}); toast(`已新增 ${add.length} 個子主題`,['復原','undo']); }
-    else { tree=await AI.generate(key,model,{topic:D.topic,notes:D.tab==='notes'?D.notes:'',depth:D.depth,breadth:D.breadth},{signal:D.ctrl.signal}); S.dialog=null; drawDialog(); const d=createMap(tree); d.icon='✨'; storeDoc(d); toast('已產生新圖「'+tree.t+'」'); }
-  }catch(e){ if(e.name==='AbortError'){ D.busy=false; return drawDialog(); } D.busy=false; D.error={kind:e.kind||'http',message:e.message}; if(S.dialog===D) drawDialog(); else openDialog(D); } }
-function aiFromBar(text){ const f=S.doc&&(selInfo()||{n:S.doc.root}); openAI('expand',{hint:text}); runAI(); const q=$('#aiq'); if(q){q.value='';q.dispatchEvent(new Event('input'));} }
+const AI_TABS=['topic','notes','expand','summary','regroup'];
+function openAI(tab='topic',extra={}){ openDialog({type:'ai',tab,topic:'',notes:'',hint:'',depth:3,breadth:'4–6',into:'new',sumTo:'note',...extra}); }
+const aiTarget=()=>S.doc?(selInfo()||{n:S.doc.root}):null;
+function nodePath(id){ const path=[]; let x=find(S.doc.root,id); while(x){ path.unshift(x.n.t); x=x.parent?find(S.doc.root,x.parent.id):null; } return path; }
+function readAI(D){ ['topic','notes','hint'].forEach(k=>{ const el=document.querySelector(`[data-ai="${k}"]`); if(el) D[k]=el.value; }); $$('.dlg input[type=radio][data-ai]:checked').forEach(el=>D[el.dataset.ai]=el.value); }
+const aiErr=(D,kind,message)=>{ D.busy=false; D.error={kind,message}; const t=(V.AIERR[kind]||V.AIERR.http)[0]; toast(kind==='input'?message:t); if(S.dialog===D) drawDialog(); else openDialog(D); };
+// preview rows: [{d,t,m}] where m = new | moved | group | note | ctx (unchanged context)
+function rowsOf(n,d,m,out,max=3){ out.push({d,t:n.t,m}); if(d<max) (n.c||[]).forEach(c=>rowsOf(c,d+1,m,out,max)); else if(n.c&&n.c.length) out.push({d:d+1,t:`…還有 ${allDeep(n).length-1} 個節點`,m:m==='ctx'?'ctx':m,more:true}); return out; }
+async function runAI(){ const D=S.dialog; if(!D||D.type!=='ai'||D.busy) return; readAI(D); const key=secrets.openai(), model=prefs.get().model;
+  D.result=null; if(!key) return aiErr(D,'nokey');
+  const f=aiTarget(), tab=D.tab, needDoc=['expand','summary','regroup'].includes(tab)||(tab==='notes'&&D.into==='node');
+  if(needDoc&&!f) return aiErr(D,'input','先開一張圖並選一個節點');
+  if(tab==='topic'&&!D.topic.trim()||tab==='notes'&&!D.notes.trim()) return aiErr(D,'input',tab==='topic'?'請先輸入主題':'請先貼上文章或文字');
+  if(tab==='regroup'&&(f.n.c||[]).length<3) return aiErr(D,'input',`「${f.n.t}」至少要有 3 個子主題才能重新分組`);
+  D.busy=true; D.error=null; D.ctrl=new AbortController(); drawDialog(); const o={signal:D.ctrl.signal};
+  try{ let res;
+    if(tab==='expand'){ const tree=await AI.expand(key,model,{path:nodePath(f.n.id),node:f.n.t,hint:D.hint},o); const add=(tree.c||[]).map(c=>ensureIds(clone(c))); if(!add.length) throw new AI.AIError('format',0,'AI 沒有產生子主題');
+      const rows=[{d:0,t:f.n.t,m:'ctx'}]; (f.n.c||[]).forEach(c=>rows.push({d:1,t:c.t,m:'ctx'})); add.forEach(c=>rowsOf(c,1,'new',rows,2));
+      res={stat:`在「${f.n.t}」底下新增 ${add.reduce((a,c)=>a+allDeep(c).length,0)} 個節點`,rows,ok:'加入圖中',
+        apply:()=>{ mutate(r=>{ const x=find(r,f.n.id); if(!x) return; x.n.c=(x.n.c||[]).concat(add); x.n.collapsed=false; },{select:add[0].id}); return `已新增 ${add.length} 個子主題`; }}; }
+    else if(tab==='topic'||tab==='notes'){ const tree=ensureIds(clone(await AI.generate(key,model,{topic:D.topic,notes:tab==='notes'?D.notes:'',depth:D.depth,breadth:D.breadth},o))); const cnt=allDeep(tree).length;
+      if(tab==='notes'&&D.into==='node'){ const rows=[{d:0,t:f.n.t,m:'ctx'}]; rowsOf(tree,1,'new',rows,3);
+        res={stat:`在「${f.n.t}」底下新增 ${cnt} 個節點`,rows,ok:'加入圖中',apply:()=>{ mutate(r=>{ const x=find(r,f.n.id); if(!x) return; (x.n.c=x.n.c||[]).push(tree); x.n.collapsed=false; },{select:tree.id}); return `已加入「${tree.t}」（${cnt} 個節點）`; }}; }
+      else res={stat:`產生新圖「${tree.t}」，共 ${cnt} 個節點`,rows:rowsOf(tree,0,'new',[],3),ok:'建立新圖',newMap:true,apply:()=>{ const d=createMap(tree); d.icon='✨'; storeDoc(d); return `已產生新圖「${tree.t}」`; }}; }
+    else if(tab==='summary'){ const root=S.doc.root, sm=await AI.summarize(key,model,{outline:IO.toMarkdown(root),hint:D.hint},o);
+      if(D.sumTo==='node'){ const node=ensureIds({t:'摘要',icon:'📝',note:sm.summary,c:sm.points.map(t=>({t}))});
+        const rows=[{d:0,t:root.t,m:'ctx'}]; rowsOf(node,1,'new',rows,2); rows.push({d:2,t:'詳情：'+sm.summary,m:'note'});
+        res={stat:`新增「摘要」節點（${sm.points.length} 個重點，摘要放在它的詳情）`,rows,ok:'加入圖中',summary:sm,apply:()=>{ mutate(r=>{ (r.c=r.c||[]).push(node); r.collapsed=false; },{select:node.id}); return '已新增「摘要」節點'; }}; }
+      else { const text=`AI 摘要：${sm.summary}${sm.points.length?'\n\n'+sm.points.map(x=>'- '+x).join('\n'):''}`, had=!!(root.note&&root.note.trim());
+        res={stat:`寫進中心主題「${root.t}」的詳情${had?'（加在原本內容後面）':''}`,rows:[{d:0,t:root.t,m:'ctx'},{d:1,t:sm.summary,m:'note'},...sm.points.map(x=>({d:1,t:x,m:'note'}))],ok:'寫進詳情',summary:sm,
+          apply:()=>{ mutate(r=>{ r.note=had?r.note.replace(/\s+$/,'')+'\n\n'+text:text; },{select:root.id}); return '已把摘要寫進中心主題的詳情'; }}; } }
+    else if(tab==='regroup'){ const kidsNow=f.n.c||[], groups=await AI.regroup(key,model,{path:nodePath(f.n.id),node:f.n.t,items:kidsNow.map(c=>c.t),hint:D.hint},o);
+      const used=new Set(), plan=[]; groups.forEach(g=>{ const its=g.items.filter(i=>i>=0&&i<kidsNow.length&&!used.has(i)); its.forEach(i=>used.add(i)); if(its.length) plan.push({id:newId(),t:g.t,items:its.map(i=>kidsNow[i].id)}); });
+      const left=kidsNow.map((c,i)=>i).filter(i=>!used.has(i)); if(left.length) plan.push({id:newId(),t:'其他',items:left.map(i=>kidsNow[i].id)});
+      if(plan.length<2) throw new AI.AIError('format',0,'AI 只分出一組，請補充分組方式後重試');
+      const byId=new Map(kidsNow.map(c=>[c.id,c])), rows=[{d:0,t:f.n.t,m:'ctx'}];
+      plan.forEach(g=>{ rows.push({d:1,t:g.t,m:'group'}); g.items.forEach(id=>{ const c=byId.get(id); rows.push({d:2,t:c.t+(c.c&&c.c.length?`（含 ${allDeep(c).length-1} 個子節點）`:''),m:'moved'}); }); });
+      res={stat:`把「${f.n.t}」的 ${kidsNow.length} 個子主題分成 ${plan.length} 組；內容與子節點都保留`,rows,ok:'套用分組',
+        apply:()=>{ mutate(r=>{ const x=find(r,f.n.id); if(!x) return; const m=new Map((x.n.c||[]).map(c=>[c.id,c])); const out=plan.map(g=>({id:g.id,t:g.t,c:g.items.map(id=>m.get(id)).filter(Boolean)})); const placed=new Set(plan.flatMap(g=>g.items)); (x.n.c||[]).forEach(c=>{ if(!placed.has(c.id)) out.push(c); }); x.n.c=out; x.n.collapsed=false; },{select:f.n.id}); return `已分成 ${plan.length} 組`; }}; }
+    if(S.dialog!==D) return; D.busy=false; D.result=res; drawDialog(); $('#layer .dlg [data-act="aiAccept"]')?.focus();
+  }catch(e){ if(e.name==='AbortError'){ D.busy=false; if(S.dialog===D) drawDialog(); toast('已停止 AI'); return; } aiErr(D,e.kind||'http',e.message); } }
+function aiAccept(){ const D=S.dialog; if(!D||!D.result) return; const res=D.result; D.onClose=null; S.dialog=null; drawDialog(); const msg=res.apply(); toast(msg,res.newMap?null:['復原','undo']); }
+function aiFromBar(text){ openAI('expand',{hint:text}); runAI(); const q=$('#aiq'); if(q){q.value='';q.dispatchEvent(new Event('input'));} }
+// ---------- v1.5 relationship lines ----------
+const relById=id=>relsOf(S.doc.root).find(r=>r.id===id);
+function updRelBar(){ const cv=$('#cv'); let b=$('#relbar'); if(!S.relPick||!cv||!S.doc){ b&&b.remove(); return; } const f=find(S.doc.root,S.relPick.from); if(!f){ S.relPick=null; b&&b.remove(); return; }
+  const html=`${I('rel')}<span class="rbt">從「<b>${esc(f.n.t)}</b>」連到…<span class="long">點選目標節點，或用方向鍵選好後按 Enter</span><span class="short">點目標節點</span></span><button class="btn" data-act="relCancel">取消</button>`;
+  if(!b){ cv.insertAdjacentHTML('beforeend',`<div class="relbar" id="relbar" role="status" aria-live="polite"></div>`); b=$('#relbar'); } if(b.dataset.for!==S.relPick.from){ b.innerHTML=html; b.dataset.for=S.relPick.from; } }
+function relStart(){ if(!S.doc||S.preview) return; if(S.outline){ S.outline=false; render(); } const f=aiTarget(); S.relPick={from:f.n.id}; S.selRel=null; drawMap(); if(!isM()) $('#cv')?.focus({preventScroll:true}); }
+function relCancel(){ S.relPick=null; drawMap(); toast('已取消關聯線'); }
+function relPickTo(id){ const from=S.relPick&&S.relPick.from; if(!from) return; if(!id||id===from){ toast('請選另一個節點當終點'); return; }
+  S.relPick=null; const ex=relsOf(S.doc.root).find(r=>r.a===from&&r.b===id||r.a===id&&r.b===from);
+  if(ex){ S.selRel=ex.id; S.sel=id; drawAll(); toast('這兩個節點已經有關聯線'); return; }
+  const rid='r'+newId(); mutate(r=>{ (r.rels=r.rels||[]).push({id:rid,a:from,b:id}); },{select:id}); S.selRel=rid; drawMap(); toast('已新增關聯線',['加標籤','relLabel']); }
+function relClick(id,x,y){ if(!relById(id)) return; S.selRel=id; drawMap(); openRelMenu(id,x,y); }
+function openRelMenu(id,x,y){ const r=relById(id); if(!r) return; const A=find(S.doc.root,r.a), B=find(S.doc.root,r.b);
+  openMenu(`<div class="ctx relmenu" role="menu" aria-label="關聯線：${esc(A?A.n.t:'')} → ${esc(B?B.n.t:'')}"><div class="lphead" aria-hidden="true">${esc(A?A.n.t:'')} → ${esc(B?B.n.t:'')}</div>${mi('relLabel','edit',r.label?'編輯標籤':'加標籤')}${mi('relFlip','redo','反轉箭頭方向')}<hr>${mi('relDel','trash','刪除關聯線','del')}</div>`,$('#cv'),{x:x-20,y:y+12,yAbove:y-12}); }
+async function relLabel(id=S.selRel){ const r=relById(id); if(!r) return; closeMenu(); const v=await askText('關聯線標籤','標籤（可留空，最多 40 字）',r.label||''); if(v===null) return;
+  mutate(root=>{ const x=(root.rels||[]).find(q=>q.id===id); if(!x) return; const t=String(v).trim().slice(0,40); if(t) x.label=t; else delete x.label; }); S.selRel=id; drawMap(); }
+function relFlip(id=S.selRel){ if(!relById(id)) return; closeMenu(); mutate(root=>{ const x=root.rels.find(q=>q.id===id); [x.a,x.b]=[x.b,x.a]; }); S.selRel=id; drawMap(); toast('已反轉箭頭方向',['復原','undo']); }
+function relDel(id=S.selRel){ if(!relById(id)) return; closeMenu(); mutate(root=>{ root.rels=root.rels.filter(q=>q.id!==id); }); S.selRel=null; drawMap(); toast('已刪除關聯線',['復原','undo']); }
+function relOf(){ const id=S.sel, list=relsOf(S.doc.root).filter(r=>r.a===id||r.b===id); if(!list.length) return toast('這個節點沒有關聯線'); const i=list.findIndex(r=>r.id===S.selRel); const r=list[(i+1)%list.length]; closeMenu(); S.selRel=r.id; drawMap();
+  const el=document.querySelector(`#vp g.rel[data-rel="${CSS.escape(r.id)}"]`), b=el?el.getBoundingClientRect():$('#cv').getBoundingClientRect(); openRelMenu(r.id,b.left+b.width/2,b.top+b.height/2); }
 // ---------- sync with GitHub ----------
 // Modes (prefs.sync): 'local' = browser only (IndexedDB), never touches the network;
 // 'manual' = changes stay local until 同步 / Ctrl+S; 'auto' = batched: at most one commit every AUTO_MS, plus when the tab is hidden.
@@ -618,8 +675,19 @@ async function act(a,v,el){ const f=selInfo();
   case 'ai': closeMenu(); openAI('topic'); break;
   case 'aiNotes': openAI('notes'); break;
   case 'aiExpand': closeMenu(); if(!S.doc) return openAI('topic'); openAI('expand'); break;
-  case 'aiTab': ['topic','notes','hint'].forEach(k=>{const e2=document.querySelector(`[data-ai="${k}"]`); if(e2) S.dialog[k]=e2.value;}); S.dialog.tab=v; S.dialog.error=null; drawDialog(); $(`#ait-${v}`)?.focus(); break;
+  case 'aiTab': readAI(S.dialog); S.dialog.result=null; S.dialog.tab=v; S.dialog.error=null; drawDialog(); $(`#ait-${v}`)?.focus(); break;
   case 'aiRun': runAI(); break;
+  case 'aiAccept': aiAccept(); break;
+  case 'aiBack': if(S.dialog){ S.dialog.result=null; drawDialog(true); } break;
+  case 'aiSummary': closeMenu(); if(!S.doc) return; openAI('summary'); break;
+  case 'aiRegroup': closeMenu(); if(!S.doc) return; openAI('regroup'); break;
+  case 'aiArticle': closeMenu(); openAI('notes',{into:S.doc?'node':'new'}); break;
+  case 'relStart': closeMenu(); relStart(); break;
+  case 'relCancel': relCancel(); break;
+  case 'relLabel': relLabel(); break;
+  case 'relFlip': relFlip(); break;
+  case 'relDel': relDel(); break;
+  case 'relOf': relOf(); break;
   case 'aiCancel': S.dialog.ctrl&&S.dialog.ctrl.abort(); break;
   case 'aibarClose': S.aibar=false; render(); break;
   case 'cfPick': S.dialog.pick=v; drawDialog(); $(`[data-act="cfPick"][data-v="${v}"]`)?.focus(); break;

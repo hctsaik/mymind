@@ -1,6 +1,6 @@
 // HTML templates. Every function returns a string; app.js owns state and events (data-act attributes).
 import { I, esc, THEMES, DEFAULT_THEME, PRI, readable } from './core.js';
-import { thumbSvg, themeThumb, LAYOUTS, tagsOf, marks } from './mapview.js';
+import { thumbSvg, themeThumb, LAYOUTS, tagsOf, marks, relsOf } from './mapview.js';
 import { VERSION } from './version.js';
 export const isMobile=()=>innerWidth<=768;
 const LOGO=`<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6" fill="#fff" stroke="none"/><path d="M8.6 12H11M11 6.5V17.5M11 6.5H19M11 12H19M11 17.5H19"/></svg>`;
@@ -38,8 +38,12 @@ export function savedChip(S){ const s=S.sync; let ic='cloud',l,sh;
   else if(S.unsynced){l=`已存本機 · ${S.unsynced} 項未同步`+(S.syncMode==='auto'&&S.autoAt?` · 約 ${Math.max(1,Math.round((S.autoAt-Date.now())/60000))} 分鐘內自動同步`:S.syncMode==='manual'?' · 按「同步」上傳':'');sh='未同步';}
   else {l='已同步到 '+(S.backendName||'GitHub')+(s.at?' · '+rel(s.at):'');sh='已同步';}
   return `<span class="saved ${s.state==='error'?'err':''}" role="status" aria-live="polite">${I(ic)}<span class="long">${esc(l)}</span><span class="short">${esc(sh)}</span></span>`;}
+// phones: the sync state rides on the ⋯ button as a badge (count, or ! when Google needs reconnecting) so the title keeps a readable width
+function moreBtn(S){ const n=S.unsynced, warn=S.remote&&(S.driveAuth||S.sync.state==='error'); const st=!S.remote?'':S.driveAuth?'，需要重新連結 Google':S.sync.state==='error'?'，同步失敗':n?`，${n} 項未同步`:'';
+  const bd=!S.remote?'':warn?`<span class="nbadge warn" aria-hidden="true">!</span>`:n?`<span class="nbadge" aria-hidden="true">${n>99?'99+':n}</span>`:'';
+  return `<button class="icon-btn mobile-only rb more${warn?' warn':''}" data-act="moreMenu" aria-haspopup="menu" aria-expanded="false" aria-label="更多：同步、層級、縮放、匯出、歷史、設定${st}">${I('more')}${bd}</button>`; }
 export function topbar(S,doc,curNode){
-  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','詳情','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
+  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','詳情','','Ctrl+Alt+M','note'],['rel','關聯線',S.relPick?'on':'','Alt+L','relStart'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
   return `<header class="top flt">
    <button class="icon-btn mobile-only rb backpill" data-act="home" aria-label="回到列表（目前節點：${esc(curNode)}）">${I('back')}<span class="cn">${esc(curNode)}</span></button>
    <div class="title"><h1 id="maptitle">${esc(doc.icon||'🧠')} ${esc(doc.root.t)}</h1>${savedChip(S)}</div>
@@ -52,7 +56,7 @@ export function topbar(S,doc,curNode){
      <button class="icon-btn mobile-only rb" data-act="style" aria-label="美化：主題與樣式">${I('wand')}</button>
      <button class="icon-btn mobile-only rb" data-act="find" aria-label="搜尋節點" aria-pressed="${!!S.find}">${I('search')}</button>
      <button class="icon-btn mobile-only rb" data-act="outline" aria-label="大綱" aria-pressed="${!!S.outline}">${I('outline')}</button>
-     <button class="icon-btn mobile-only rb" data-act="moreMenu" aria-haspopup="menu" aria-expanded="false" aria-label="更多：層級、縮放、匯出、歷史、設定">${I('more')}</button>
+     ${moreBtn(S)}
    </div></header>`;
 }
 export function editorShell(S,doc,curNode){ const th=THEMES[doc.theme]||THEMES[DEFAULT_THEME], m=isMobile(), sheet=m&&S.panel;
@@ -131,7 +135,7 @@ export function outlineView(root,S={}){ const rows=[]; const m=isMobile(); let N
       <input class="olin${n.done?' done':''}" data-olid="${n.id}" value="${esc(n.t)}" aria-label="第 ${lv+1} 層${n.collapsed&&has?'（已收合）':''}" autocomplete="off" spellcheck="false" enterkeyhint="next">
       <span class="olmeta">${tg.map(t=>`<span class="oltag">#${esc(t)}</span>`).join('')}${n.link?`<a class="olmi" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer" tabindex="-1" aria-label="開啟連結">${I('link')}</a>`:''}${n.img?`<span class="olmi" title="有圖片" aria-label="有圖片">${I('image')}</span>`:''}${n.note?`<button class="olmi" data-act="olNote" data-v="${n.id}" tabindex="-1" aria-label="備註：${esc(n.note.slice(0,40))}">${I('note')}</button>`:''}</span></div>`);
     if(!n.collapsed||lv===0) k.forEach(c=>w(c,lv+1)); })(root,0);
-  return `<div class="outline" role="region" aria-label="大綱（可編輯）"><div class="doc"><div class="olhead"><div><h2>大綱</h2><p class="olhint">${m?'點一行就能改字；下方按鈕可縮排、移動或刪除。':'直接改字 · <span class="kbd">Enter</span> 新增 · <span class="kbd">Tab</span> 縮排 · <span class="kbd">Shift+Tab</span> 退一層 · <span class="kbd">Alt+↑↓</span> 移動 · <span class="kbd">Esc</span> 回心智圖'}</p></div><button class="btn" data-act="outline">${I('mapic')}回到心智圖</button></div>
+  return `<div class="outline" role="region" aria-label="大綱（可編輯）"><div class="doc"><div class="olhead"><div><h2>大綱</h2><p class="olhint">${m?'點一行就能改字；下方按鈕可縮排、移動或刪除。':'直接改字 · <span class="kbd">Enter</span> 新增 · <span class="kbd">Tab</span> 縮排 · <span class="kbd">Shift+Tab</span> 退一層 · <span class="kbd">Alt+↑↓</span> 移動 · <span class="kbd">Esc</span> 回心智圖'}</p></div><button class="btn" data-act="outline">${I('mapic')}回到心智圖</button></div>${relsOf(root).length?`<p class="olrels" role="note">${I('rel')}<span>這張圖有 ${relsOf(root).length} 條關聯線，只在心智圖檢視顯示（匯出 Markdown 也不包含）。</span></p>`:''}
     <div class="olt" role="tree" aria-label="${esc(root.t)}，共 ${N} 個節點">${rows.join('')}</div></div>
     ${m?`<div class="olbar" role="toolbar" aria-label="大綱編輯">${[['olOutdent','outdent','取消縮排'],['olIndent','indent','縮排'],['olUp','up','上移'],['olDown','down','下移'],['olAdd','plus','新增'],['olDel','trash','刪除']].map(([a,i,l])=>`<button data-act="${a}" aria-label="${l}">${I(i)}<span>${l}</span></button>`).join('')}</div>`:''}</div>`;}
 
@@ -239,26 +243,35 @@ export function settingsDialog(S,D){ const a11y=D.tab==='a11y', data=D.tab==='da
    :data?`<div class="mfoot"><span class="info">${I('info')}換同步方式後按「儲存」</span><button class="btn" data-act="closeDialog">取消</button><button class="btn primary" data-act="saveSettings">儲存</button></div>`
    :`<div class="mfoot"><div class="warnbox" role="note">${I('info')}<div>金鑰<b>只存在這個瀏覽器</b>（localStorage），不會上傳到程式碼儲存庫。公用電腦請不要儲存；換裝置要重新輸入。</div></div><button class="btn" style="margin-left:auto" data-act="clearKeys">清除金鑰</button><button class="btn primary" data-act="saveSettings">儲存</button></div>`}
   </div></div>`;}
-const AIERR={auth:['OpenAI 金鑰無效（401）','金鑰可能打錯、已刪除或沒有額度。你的內容還在，修正後可以直接重試。'],quota:['請求太多或額度用完（429）','稍等一下再試，或到 OpenAI 帳單頁確認額度。'],network:['網路連線失敗','檢查網路後重試；內容不會遺失。'],format:['AI 回傳的格式不對','已自動重試一次仍失敗，請再試一次或簡化內容。'],model:['找不到這個模型（404）','到設定確認模型名稱，例如 gpt-4o-mini。'],nokey:['還沒有設定 OpenAI 金鑰','到 設定 › GitHub 與 AI 貼上 OpenAI 金鑰後再試。'],http:['OpenAI 回傳錯誤','請稍後再試。']};
-export function aiDialog(S,A,selNode){ const tabs=[['topic','輸入主題','一句話產生整張圖'],['notes','筆記整理','貼上文字自動整理'],['expand','展開節點','為選取節點發想']];
-  const e=A.error&&(AIERR[A.error.kind]||AIERR.http);
+export const AIERR={input:['還不能產生','請依提示補上內容後再試。'],auth:['OpenAI 金鑰無效（401）','金鑰可能打錯、已刪除或沒有額度。你的內容還在，修正後可以直接重試。'],quota:['請求太多或額度用完（429）','稍等一下再試，或到 OpenAI 帳單頁確認額度。'],network:['網路連線失敗','檢查網路後重試；內容不會遺失。'],format:['AI 回傳的格式不對','已自動重試一次仍失敗，請再試一次或簡化內容。'],model:['找不到這個模型（404）','到設定確認模型名稱，例如 gpt-4o-mini。'],nokey:['還沒有設定 OpenAI 金鑰','到 設定 › GitHub 與 AI 貼上 OpenAI 金鑰後再試。'],http:['OpenAI 回傳錯誤','請稍後再試。']};
+export function aiDialog(S,A,selNode,root){ const tabs=[['topic','輸入主題','一句話產生整張圖'],['notes','文章轉圖','貼上文章自動整理'],['expand','擴充分支','為選取節點發想'],['summary','摘要','濃縮整張圖重點'],['regroup','重新分組','整理子主題']];
+  const e=A.error&&(AIERR[A.error.kind]||AIERR.http), R=A.result, sel=selNode||root, nk=sel&&sel.c?sel.c.length:0, len=(A.notes||'').length;
+  const radios=(name,opts)=>`<div class="airadios" role="radiogroup" aria-label="${name==='into'?'放到哪裡':'摘要放哪裡'}">${opts.map(([v,l,dis])=>`<label class="airadio${dis?' dis':''}"><input type="radio" name="ai-${name}" data-ai="${name}" value="${v}"${A[name]===v?' checked':''}${dis?' disabled':''}><span>${l}</span></label>`).join('')}</div>`;
+  const hint=(ph)=>`<label for="ai-hint" class="sr">補充需求</label><textarea class="ta" id="ai-hint" data-ai="hint" style="min-height:72px" placeholder="${ph}">${esc(A.hint||'')}</textarea>`;
   const pane=k=>k==='topic'?`<label for="ai-topic" class="sr">主題</label><textarea class="ta" id="ai-topic" data-ai="topic" style="min-height:90px" placeholder="例如：2027 名古屋家族旅行">${esc(A.topic||'')}</textarea>`
-    :k==='notes'?`<label class="sr" for="ai-notes">筆記內容</label><textarea class="ta" id="ai-notes" data-ai="notes" placeholder="貼上會議紀錄、文章或筆記…">${esc(A.notes||'')}</textarea>`
-    :`${selNode?`<p class="panel-note" style="margin:0 0 8px">為「<b>${esc(selNode.t)}</b>」新增子主題</p>`:`<p class="panel-note">先開一張圖並選一個節點。</p>`}<label for="ai-hint" class="sr">補充需求</label><textarea class="ta" id="ai-hint" data-ai="hint" style="min-height:80px" placeholder="補充需求（選填），例如：偏重預算">${esc(A.hint||'')}</textarea>`;
-  return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-h">
-   <div class="mhead"><div class="spark" aria-hidden="true">${I('spark')}</div><div><h3 id="ai-h">AI 產生心智圖</h3><p>用你的 OpenAI 金鑰，在瀏覽器直接產生</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
+    :k==='notes'?`<label class="sr" for="ai-notes">文章或文字</label><textarea class="ta" id="ai-notes" data-ai="notes" placeholder="貼上文章、會議紀錄或筆記…">${esc(A.notes||'')}</textarea><p class="aicount${len>12000?' over':''}">${len.toLocaleString()} / 12,000 字${len>12000?'（超過的部分不會送出）':''}</p>${radios('into',[['new','建立新圖'],['node',sel?`加到「${esc(sel.t.slice(0,14))}」底下`:'加到選取節點底下（先開一張圖）',!sel]])}`
+    :k==='expand'?`${selNode?`<p class="panel-note" style="margin:0 0 8px">為「<b>${esc(selNode.t)}</b>」新增子主題（可以再往下一層）</p>`:`<p class="panel-note">先開一張圖並選一個節點。</p>`}${hint('補充需求（選填），例如：偏重預算')}`
+    :k==='summary'?`${root?`<p class="panel-note" style="margin:0 0 8px">濃縮「<b>${esc(root.t)}</b>」整張圖，寫出摘要與重點</p>${radios('sumTo',[['note',`寫進中心主題的詳情`],['node','新增「摘要」節點']])}`:`<p class="panel-note">先開一張圖。</p>`}${hint('補充需求（選填），例如：給主管看的版本')}`
+    :`${selNode?(nk>=3?`<p class="panel-note" style="margin:0 0 8px">把「<b>${esc(selNode.t)}</b>」的 ${nk} 個子主題重新分組；子主題和它們底下的內容都會保留</p>`:`<p class="panel-note" style="margin:0 0 8px">「<b>${esc(selNode.t)}</b>」只有 ${nk} 個子主題，至少要 3 個才能分組。先選一個子主題較多的節點。</p>`):`<p class="panel-note">先開一張圖並選一個節點。</p>`}${hint('分組方式（選填），例如：依時間先後')}`;
+  const ML={new:'新增',moved:'移動',group:'新分組',note:'詳情',ctx:''};
+  const result=R?`<section class="aires" aria-labelledby="ai-res-h"><h4 id="ai-res-h">${I('check')}預覽變更</h4><p class="aistat">${esc(R.stat)}</p>
+    <ul class="difftree">${R.rows.map(r=>`<li class="dr m-${r.m}${r.more?' more':''}" style="--d:${r.d}">${ML[r.m]?`<span class="dm">${ML[r.m]}</span>`:''}<span class="dt">${esc(r.t)}</span></li>`).join('')}</ul>
+    <p class="panel-note aiundo">${R.newMap?'會建立一張新圖，原本的圖不受影響。':'按「'+esc(R.ok)+'」後是一個步驟，可以用 Ctrl+Z 或「復原」還原。'}</p></section>`:'';
+  const busyTxt={topic:'產生中…',notes:'整理文章中…',expand:'發想子主題中…',summary:'摘要中…',regroup:'分組中…'}[A.tab];
+  return `<div class="scrim" data-act="scrim"><div class="modal aimodal" role="dialog" aria-modal="true" aria-labelledby="ai-h">
+   <div class="mhead"><div class="spark" aria-hidden="true">${I('spark')}</div><div><h3 id="ai-h">AI 助手</h3><p>用你的 OpenAI 金鑰，在瀏覽器直接處理；先預覽再決定</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
    <div class="mbody">
-    ${e?`<div class="alert err" role="alert">${I('alert')}<div><b>${e[0]}</b><br>${e[1]}${A.error.message&&A.error.kind!=='nokey'?`<br><small>${esc(A.error.message).slice(0,160)}</small>`:''}<div class="acts"><button class="btn primary" data-act="settings">前往設定</button><button class="btn" data-act="aiRun">重試</button></div></div></div>`:''}
-    <div class="aitabs" role="tablist" aria-label="AI 模式">${tabs.map(([k,b,s])=>`<button class="aitab" role="tab" id="ait-${k}" data-act="aiTab" data-v="${k}" aria-selected="${A.tab===k}" aria-controls="aip-${k}" tabindex="${A.tab===k?0:-1}"><b>${b}</b>${s}</button>`).join('')}</div>
+    ${e?`<div class="alert err" role="alert">${I('alert')}<div><b>${e[0]}</b><br>${A.error.kind==='input'?esc(A.error.message):e[1]}${A.error.message&&!['nokey','input'].includes(A.error.kind)?`<br><small>${esc(A.error.message).slice(0,160)}</small>`:''}${A.error.kind==='input'?'':`<div class="acts">${['nokey','auth','model'].includes(A.error.kind)?`<button class="btn primary" data-act="settings">前往設定</button>`:''}<button class="btn" data-act="aiRun">重試</button></div>`}</div></div>`:''}
+    ${R?result:`<div class="aitabs" role="tablist" aria-label="AI 功能">${tabs.map(([k,b,sub])=>`<button class="aitab" role="tab" id="ait-${k}" data-act="aiTab" data-v="${k}" aria-selected="${A.tab===k}" aria-controls="aip-${k}" tabindex="${A.tab===k?0:-1}"${A.busy?' disabled':''}><b>${b}</b><span class="sub">${sub}</span></button>`).join('')}</div>
     ${tabs.map(([k])=>`<div role="tabpanel" id="aip-${k}" aria-labelledby="ait-${k}"${A.tab===k?'':' hidden'}>${A.tab===k?pane(k):''}</div>`).join('')}
-    <div class="opts">
+    ${A.tab==='topic'||A.tab==='notes'?`<div class="opts">
      <label class="opt"><small>層數</small><select data-ai="depth">${[2,3,4].map(v=>`<option${+A.depth===v?' selected':''} value="${v}">${v} 層</option>`).join('')}</select></label>
      <label class="opt"><small>每層分支</small><select data-ai="breadth">${['3–4','4–6','6–8'].map(v=>`<option${A.breadth===v?' selected':''}>${v}</option>`).join('')}</select></label>
      <div class="opt"><small>模型</small><span>${esc(S.model)}</span></div>
-    </div>
-    ${A.busy?`<div class="preview" aria-live="polite"><h5>${I('spark')}產生中…</h5><div class="pv"><div class="shimmer" style="width:70%"></div><div class="shimmer" style="width:58%"></div><div class="shimmer" style="width:40%"></div></div></div>`:''}
+    </div>`:`<p class="aimodel">模型：${esc(S.model)}</p>`}
+    ${A.busy?`<div class="preview" aria-live="polite"><h5>${I('spark')}${busyTxt}</h5><div class="pv"><div class="shimmer" style="width:70%"></div><div class="shimmer" style="width:58%"></div><div class="shimmer" style="width:40%"></div></div></div>`:''}`}
    </div>
-   <div class="mfoot"><span class="info">${I('lock')}金鑰只存在這個瀏覽器</span><button class="btn" data-act="${A.busy?'aiCancel':'closeDialog'}">${A.busy?'停止':'取消'}</button><button class="btn ai-go" data-act="aiRun"${A.busy?' disabled':''}>${I('spark')}${A.tab==='expand'?'產生並插入':'產生新圖'}</button></div>
+   <div class="mfoot"><span class="info">${I('lock')}金鑰只存在這個瀏覽器</span>${R?`<button class="btn" data-act="closeDialog">取消</button><button class="btn" data-act="aiRun">${I('undo')}重新產生</button><button class="btn primary" data-act="aiAccept">${I('check')}${esc(R.ok)}</button>`:`<button class="btn" data-act="${A.busy?'aiCancel':'closeDialog'}">${A.busy?'停止':'取消'}</button><button class="btn ai-go" data-act="aiRun"${A.busy?' disabled':''}>${I('spark')}產生預覽</button>`}</div>
   </div></div>`;}
 export function conflictDialog(C){ const d1=C.mineDiff,d2=C.theirsDiff;
   return `<div class="scrim"><div class="modal" style="width:min(760px,100%)" role="alertdialog" aria-modal="true" aria-labelledby="cf-h" aria-describedby="cf-d">
@@ -274,7 +287,7 @@ export function conflictDialog(C){ const d1=C.mineDiff,d2=C.theirsDiff;
    </div>
    <div class="mfoot"><span class="info">${I('info')}不論選哪個，都不會遺失資料</span><button class="btn" data-act="closeDialog">稍後</button><button class="btn primary" data-act="cfApply">套用</button></div>
   </div></div>`;}
-export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['Ctrl+C','複製節點（Markdown）'],['Ctrl+X','剪下節點'],['Ctrl+V','貼上 Markdown／節點'],['Ctrl+Shift+V','開啟「從 Markdown 匯入」'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','節點詳情（備註、連結、標籤、顏色、圖片）'],['Ctrl+1…5','優先順序'],['Ctrl+F','搜尋節點（Enter 下一個、Shift+Enter 上一個）'],['F3 / Shift+F3','下一個／上一個符合'],['/','搜尋心智圖標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
+export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['Ctrl+C','複製節點（Markdown）'],['Ctrl+X','剪下節點'],['Ctrl+V','貼上 Markdown／節點'],['Ctrl+Shift+V','開啟「從 Markdown 匯入」'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','節點詳情（備註、連結、標籤、顏色、圖片）'],['Ctrl+1…5','優先順序'],['Ctrl+J','AI 擴充選取節點（也可摘要、重新分組）'],['Alt+L','從選取節點拉關聯線（選好終點按 Enter）'],['Ctrl+F','搜尋節點（Enter 下一個、Shift+Enter 上一個）'],['F3 / Shift+F3','下一個／上一個符合'],['/','搜尋心智圖標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
   return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kb-h" style="width:min(520px,100%)"><div class="mhead"><div class="spark" aria-hidden="true">${I('kb')}</div><div><h3 id="kb-h">鍵盤快捷鍵</h3><p>焦點在畫布上時使用 · MyMind v${VERSION}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody"><table class="kbt">${rows.map(([k,v])=>`<tr><td><span class="kbd">${k}</span></td><td>${v}</td></tr>`).join('')}</table></div></div></div>`;}
 export function promptDialog(P){ return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pr-h" style="width:min(440px,100%)"><div class="mhead"><div><h3 id="pr-h">${esc(P.title)}</h3>${P.sub?`<p>${esc(P.sub)}</p>`:''}</div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody">${P.input!==undefined?`<div class="field"><label for="pr-in">${esc(P.label||'')}</label><div class="inp"><input id="pr-in" value="${esc(P.input)}" autocomplete="off"></div></div>`:''}</div><div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn ${P.danger?'danger':'primary'}" data-act="promptOk">${esc(P.ok||'確定')}</button></div></div></div>`;}
 

@@ -108,6 +108,7 @@ export function renderMap(root,th,opt={}){
     const base=th.lw||(th.line?(n.d===0?1.8:1.2):(edge==='bracket'?(n.d===0?2.6:1.6):(n.d===0?3.2:2)));
     edges+=`<path data-g="edge" data-gbg="${CV}" d="${p}" fill="none" stroke="${lineC&&!(c.br&&typeof c.br==='object')?G(lineC):G(col)}" stroke-width="${Math.max(base*mult,minW).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   }));
+  const R=relsSvg(root,th,opt,{CV,G,SEL,minW}); defs+=R.defs; edges+=R.lines;
   nodes.forEach(n=>{
     const col0=colorOf(n,th), col=n.d===0?th.root:brC(n), x=n.x-n.w/2, y=n.y-n.h/2, d=n.d; let g='';
     let fill='none',stroke='none',txt=th.text,sw=0,rx=8,fw=d===0?700:d===1?600:400, bgc=CV;
@@ -157,7 +158,7 @@ export function renderMap(root,th,opt={}){
       g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
     body+=`<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`;
   });
-  return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>${defs}</defs><g class="edges">${edges}</g>${body}`,b:bounds(root)};
+  return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>${defs}</defs><g class="edges">${edges}</g>${body}${R.labels}`,b:relBounds(root,bounds(root))};
 }
 export function thumbSvg(data,th,pad=30,st={}){const r=layout(JSON.parse(JSON.stringify(data)),th,st);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}
 export function themeThumb(th){const c=th.br, g=x=>readable(x,th.canvas,3), gb=`data-gbg="${th.canvas}"`;
@@ -165,3 +166,29 @@ export function themeThumb(th){const c=th.br, g=x=>readable(x,th.canvas,3), gb=`
   ${[[18,16],[18,46],[102,16],[102,46]].map(([x,y],i)=>`<path d="M${x<60?48:72},31 C${x<60?36:84},31 ${x<60?36:84},${y} ${x<60?30:90},${y}" data-g="edge" ${gb} stroke="${g(th.line||c[i])}" stroke-width="2" fill="none"/>`).join('')}
   <rect x="44" y="23" width="32" height="16" rx="5" data-g="node" ${gb} fill="${th.root}" stroke="${cr(th.root,th.canvas)<3?g(th.line||th.root):'none'}" stroke-width="1.2"/>
   ${[[6,10],[6,40],[90,10],[90,40]].map(([x,y],i)=>`<rect data-g="node" ${gb} x="${x}" y="${y}" width="24" height="12" rx="4" fill="${th.l1==='solid'?c[i]:th.l1==='outline'?(th.dark?'#1E2128':'#fff'):tint(c[i],.18,th.canvas)}" stroke="${g(c[i])}" stroke-width="1.2"/>`).join('')}</svg>`;}
+
+// ---------- v1.5 relationship lines (cross-branch links) ----------
+// Stored on the root as root.rels=[{id,a,b,label}] so they ride along with undo, sync, merge and every export.
+export const relsOf=root=>Array.isArray(root.rels)?root.rels.filter(r=>r&&r.id&&r.a&&r.b&&r.a!==r.b):[];
+const RELF=`600 12.5px ${FF}`;
+function edgePt(n,tx,ty){ const dx=tx-n.x, dy=ty-n.y; if(!dx&&!dy) return [n.x,n.y]; const k=Math.min((n.w/2+4)/Math.abs(dx||1e-9),(n.h/2+4)/Math.abs(dy||1e-9)); return [n.x+dx*k,n.y+dy*k]; }
+// geometry for one relationship: a gentle cubic curve bowed to one side, starting/ending on the node boxes
+export function relGeom(A,B){ const ax=A.x,ay=A.y,bx=B.x,by=B.y, dx=bx-ax, dy=by-ay, L=Math.hypot(dx,dy)||1; let nx=-dy/L, ny=dx/L; if(ny>0||(Math.abs(ny)<1e-6&&nx<0)){nx=-nx;ny=-ny;}
+  const h=Math.min(150,L*.28)+24, c1=[ax+dx/3+nx*h,ay+dy/3+ny*h], c2=[ax+dx*2/3+nx*h,ay+dy*2/3+ny*h];
+  const p0=edgePt(A,c1[0],c1[1]), p3=edgePt(B,c2[0],c2[1]); const mid=[(p0[0]+3*c1[0]+3*c2[0]+p3[0])/8,(p0[1]+3*c1[1]+3*c2[1]+p3[1])/8];
+  return {d:`M${p0[0].toFixed(1)},${p0[1].toFixed(1)} C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p3[0].toFixed(1)},${p3[1].toFixed(1)}`,mid,box:[Math.min(p0[0],p3[0],mid[0]),Math.min(p0[1],p3[1],mid[1]),Math.max(p0[0],p3[0],mid[0]),Math.max(p0[1],p3[1],mid[1])]}; }
+function relEnds(root){ const vis=new Set(all(root).map(n=>n.id)), by=new Map(); allDeep(root).forEach(n=>by.set(n.id,n));
+  const up=id=>{ let n=by.get(id), moved=false; while(n&&!vis.has(n.id)){ n=n.parent; moved=true; } return n?{n,moved}:null; };
+  return relsOf(root).map(r=>{ const A=up(r.a), B=up(r.b); return A&&B&&A.n!==B.n?{r,A:A.n,B:B.n,hidden:A.moved||B.moved}:null; }).filter(Boolean); }
+export const relAccent=th=>th.rel||th.line||th.br[0];
+function relsSvg(root,th,opt,{CV,G,SEL,minW}){ const list=relEnds(root); if(!list.length) return {defs:'',lines:'',labels:''};
+  const col=G(relAccent(th)), key=col.slice(1), selC=SEL; let lines='',labels='';
+  const defs=`<marker id="rela-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${col}"/></marker><marker id="relas-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${selC}"/></marker>`;
+  const hitW=Math.max(12,(opt.mobile?30:16)/(opt.sc||1));
+  list.forEach(({r,A,B,hidden})=>{ const g=relGeom(A,B), sel=opt.selRel===r.id&&!opt.thumb, c=sel?selC:col, w=Math.max(sel?2.6:1.8,minW);
+    const lbl=String(r.label||'').trim(), name=`關聯線：${A.t||''} → ${B.t||''}${lbl?'（'+lbl+'）':''}${hidden?'，端點在收合的分支裡':''}`;
+    lines+=`<g class="rel${sel?' sel':''}" data-rel="${esc(r.id)}" role="button" aria-label="${esc(name)}"${hidden?' opacity=".6"':''}>${opt.thumb?'':`<path class="relhit" d="${g.d}" fill="none" stroke="transparent" stroke-width="${hitW.toFixed(1)}"/>`}${sel?`<path d="${g.d}" fill="none" stroke="${selC}" stroke-opacity=".18" stroke-width="${(w+6).toFixed(1)}" stroke-linecap="round"/>`:''}<path data-g="rel" data-gbg="${CV}" d="${g.d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}" stroke-dasharray="7 5" stroke-linecap="round" marker-end="url(#${sel?'relas':'rela'}-${key})"/></g>`;
+    if(lbl){ const t=lbl.length>24?lbl.slice(0,23)+'…':lbl, tw0=tw(t,RELF), W=tw0+18, H=24, x=g.mid[0]-W/2, y=g.mid[1]-H/2, tc=readable(th.text,CV,4.5);
+      labels+=`<g class="rel rellbl${sel?' sel':''}" data-rel="${esc(r.id)}" aria-hidden="true"><rect data-g="rel" data-gbg="${CV}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${W.toFixed(1)}" height="${H}" rx="12" fill="${CV}" stroke="${c}" stroke-width="${sel?2:1.2}"/><text x="${g.mid[0].toFixed(1)}" y="${(g.mid[1]+4.4).toFixed(1)}" font-size="12.5" font-weight="600" fill="${tc}" data-bg="${CV}" text-anchor="middle">${esc(t)}</text></g>`; } });
+  return {defs,lines,labels}; }
+function relBounds(root,b){ const list=relEnds(root); if(!list.length) return b; let {x0,y0,x1,y1}=b; list.forEach(({A,B,r})=>{ const g=relGeom(A,B); const lw=r.label?tw(String(r.label).slice(0,24),RELF)/2+12:0; x0=Math.min(x0,g.box[0]-lw); y0=Math.min(y0,g.box[1]-14); x1=Math.max(x1,g.box[2]+lw); y1=Math.max(y1,g.box[3]+14); }); return {x0,y0,x1,y1,w:x1-x0,h:y1-y0}; }
