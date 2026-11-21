@@ -846,7 +846,8 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .olrels{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 12px;border-radius:var(--r-md);background:var(--accent-soft);color:var(--text);font-size:13px}
 .olrels .i{width:16px;height:16px;color:var(--accent);flex:none}
 @media (max-width:768px){
- .relbar{top:auto;bottom:calc(84px + env(safe-area-inset-bottom));padding:6px 6px 6px 12px}
+ .relbar{top:auto;bottom:calc(84px + env(safe-area-inset-bottom));padding:6px 6px 6px 12px;width:calc(100% - 24px);border-radius:22px}
+ .relbar .rbt{flex:1;line-height:1.35}
  .relbar .long{display:none} .relbar .short{display:inline;margin-left:4px;color:var(--text-2)}
  .relbar .btn{height:44px;min-width:64px}
  .relmenu button{height:44px}
@@ -883,3 +884,6 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
   .nodetb .btn{height:44px;min-width:44px;padding:0 12px;gap:6px;font-size:14px;font-weight:600;border:0;background:transparent;color:var(--text)}
   .nodetb .btn:first-child{color:var(--accent)}
 }
+
+/* v1.5 review: on phones the toast moves to the top while the relationship pick bar is showing, so it never covers the instructions or 取消 */
+@media (max-width:768px){ body:has(#relbar) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))} }

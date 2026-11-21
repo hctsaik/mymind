@@ -73,6 +73,11 @@ async function ime(p,parts,final){ const c=await cdpOf(p); for(const t of parts)
   await W(1600); const [ex,ey]=[20,420]; await p.touchscreen.tap(ex,ey); await W(400); s=await edState(p);
   ok('D: tapping empty canvas later commits the edit',!s.ed&&!s.editing&&await p.evaluate(()=>window.__mm.doc.root.c[0].t)==='暫時',JSON.stringify(s));
   await p.ctx.close(); }
+{ // F. the echo guard only swallows the opening tap's own compat events: a quick real tap on another button still works
+  const p=await phone(); let [x,y]=await center(p,'a'); await p.touchscreen.tap(x,y); await W(700); await p.touchscreen.tap(x,y); await W(150);
+  const mb=await p.locator('.rb.more').boundingBox(); await p.touchscreen.tap(mb.x+mb.width/2,mb.y+mb.height/2); await W(300);
+  ok('F: tapping ⋯ right after opening the editor still opens the menu (and commits the edit)',await p.locator('.ctx, .lpmenu, [role=menu]').count()>0&&!(await edState(p)).editing,JSON.stringify(await edState(p)));
+  await p.ctx.close(); }
 { // E. ?debug=focus on-screen log
   const p=await phone('&debug=focus'); let [x,y]=await center(p,'a'); await p.touchscreen.tap(x,y); await W(700); await p.touchscreen.tap(x,y); await W(200); await keyboardOpens(p); await W(200);
   const t=await p.locator('#mmdebug').textContent().catch(()=>'');

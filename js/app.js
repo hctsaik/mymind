@@ -116,7 +116,13 @@ function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const
   const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod,selRel:S.selRel});
   vp.innerHTML=svg; updRelBar(); S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
   $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
-function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; positionEditor(); updateMinimapVp(); }
+function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; clampRelLabels(); positionEditor(); updateMinimapVp(); }
+// v1.5 review: keep relationship-line labels inside the visible canvas (8px margin; clear of the phone top bar / bottom bar)
+function clampRelLabels(){ const st=$('#stage'); if(!st) return; const L=st.querySelectorAll('#mapsvg g.rellbl'); if(!L.length) return; const R=st.getBoundingClientRect(), sc=S.vp.sc, M=8, top=R.top+(isM()?72:M), bot=R.bottom-(isM()?96:M);
+  L.forEach(g=>{ g.removeAttribute('transform'); const b=g.getBoundingClientRect(); if(!b.width) return; let dx=0,dy=0;
+    if(b.right>R.right-M) dx=R.right-M-b.right; if(b.left+dx<R.left+M) dx=R.left+M-b.left; if(b.bottom>bot) dy=bot-b.bottom; if(b.top+dy<top) dy=top-b.top;
+    // only nudge labels whose line is at least partly on screen (a fully off-screen line keeps its label with it)
+    if((dx||dy)&&Math.abs(dx)<b.width+40&&Math.abs(dy)<b.height+60) g.setAttribute('transform',`translate(${(dx/sc).toFixed(1)},${(dy/sc).toFixed(1)})`); }); }
 function drawOverview(lod){ const o=$('#ovl'); if(!o) return; o.querySelectorAll('.ovchip').forEach(e=>e.remove()); if(!lod) return; const T=th(), {tx,ty,sc}=S.vp;
   all(lay.r).filter(n=>n.d<=1).forEach(n=>{const c=n.d===0?T.root:colorOf(n,T); let fg=n.d===0?T.rootText:'#1F2329'; let cc=c;
     if(n.d===1&&cr('#FFFFFF',c)>=4.5) fg='#FFFFFF'; else if(n.d===1&&T.l1!=='tag'&&lum(c)<.3){ for(let t=0;cr('#FFFFFF',cc)<4.6&&t<=1;t+=.04) cc=mix(c,'#000000',t); fg='#FFFFFF'; }
@@ -185,15 +191,15 @@ function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits
   drawAll(); centerOn(id); updateFindCount(); }
 function select(id,{scroll=true}={}){ S.sel=id; S.selRel=null; drawAll(); if(scroll) ensureVisible(id); }
 // ---------- inline edit ----------
-let edEl=null, editAt=0, tapOpened=0, resizePending=false, lastPT='mouse';
+let edEl=null, editAt=0, tapOpened=0, tapPt=[-999,-999], resizePending=false;
 const dbg=m=>{ if(window.__mmDbg) window.__mmDbg(m); };
 function keepEditorInView(){ const ta=edEl, st=$('#stage'); if(!ta||!st||!S.editing||!S.vp) return; const vv=window.visualViewport, bottom=vv?vv.offsetTop+vv.height:innerHeight, r=ta.getBoundingClientRect(), top=isM()?72:8, M=12; let dy=0;
   if(r.bottom>bottom-M) dy=bottom-M-r.bottom; if(r.top+dy<top) dy=top-r.top; if(dy){ S.vp={...S.vp,ty:S.vp.ty+dy}; applyVp(); } }
 function afterEdit(){ if(!resizePending) return; resizePending=false; clearTimeout(rT); rT=setTimeout(()=>{ if(!S.editing){ shellKey=''; render(); } },200); }
 // compat mouse events from a phone tap arrive ~300 ms later; right after the editor opened they must not move focus or act
-document.addEventListener('pointerdown',e=>{ lastPT=e.pointerType||'mouse'; },true);
-['mousedown','mouseup','click'].forEach(t=>document.addEventListener(t,e=>{ if(!S.editing||!edEl||Date.now()-editAt>800||edEl.contains(e.target)) return;
-  const touchy=(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents)||lastPT!=='mouse'; if(!touchy) return; e.preventDefault(); e.stopPropagation(); dbg(t+' ignored (just opened editor)'); },true));
+['mousedown','mouseup','click'].forEach(t=>document.addEventListener(t,e=>{ if(!S.editing||!edEl||Date.now()-tapOpened>800||edEl.contains(e.target)) return;
+  // only the echo of the tap that opened the editor (same spot); a real tap on another button still works
+  if(Math.hypot(e.clientX-tapPt[0],e.clientY-tapPt[1])>40) return; e.preventDefault(); e.stopPropagation(); dbg(t+' ignored (just opened editor)'); },true));
 function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
   S.editing={id,isNew,orig:find(S.doc.root,id).n.t}; ensureVisible(id); const o=$('#ovl'); o.querySelector('.editbox')?.remove();
   const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; ta.setAttribute('enterkeyhint','done'); o.appendChild(ta); edEl=ta; editAt=Date.now(); positionEditor(); ta.focus({preventScroll:true}); ta.select(); dbg('editor open #'+id+(navigator.userActivation?' activation='+navigator.userActivation.isActive:''));
@@ -246,7 +252,7 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
       else if(S.relPick){ relPickTo(d.id); }
       else if(d.link){ if(S.editing) commitEdit(); select(d.id,{scroll:false}); openDetails('link'); }
-      else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')){ startEdit(d.id); if(e.pointerType==='touch') tapOpened=Date.now(); } /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
+      else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')){ startEdit(d.id); if(e.pointerType==='touch'){ tapOpened=Date.now(); tapPt=[e.clientX,e.clientY]; } } /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('touchend',e=>{ if(Date.now()-tapOpened<400){ e.preventDefault(); dbg('touchend cancelled (tap opened editor)'); } },{passive:false});
   st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });

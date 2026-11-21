@@ -114,6 +114,8 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':''; const sfx=mobi
   else { await p.focus('#cv'); await p.keyboard.press('Alt+l'); }
   await W(250); ok(T+'rel: pick mode shows an instruction bar with 取消',await p.locator('#relbar').isVisible()&&/講者/.test(await p.locator('#relbar').textContent()));
   await shot('07-rel-pick');
+  { const ov=await p.evaluate(()=>{ document.body.insertAdjacentHTML('beforeend','<div class="toast on" id="tt" role="status">已產生新圖「日本旅遊計畫」</div>'); const t=document.getElementById('tt').getBoundingClientRect(), b=document.getElementById('relbar').getBoundingClientRect(); document.getElementById('tt').remove(); return !(t.right<=b.left||t.left>=b.right||t.bottom<=b.top||t.top>=b.bottom); });
+    ok(T+'rel pick bar: a toast never covers the instruction bar',!ov); }
   await tap(await center('e')); r=await R();
   ok(T+'rel: tapping the target creates a line stored in the map',r.rels&&r.rels.length===1&&r.rels[0].a==='b'&&r.rels[0].b==='e',JSON.stringify(r.rels));
   const relSvg=await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.rel'); const v=g&&g.querySelector('path[data-g=rel]'); return v?{dash:v.getAttribute('stroke-dasharray'),marker:v.getAttribute('marker-end'),d:v.getAttribute('d'),label:g.getAttribute('aria-label')}:null; });
@@ -128,6 +130,11 @@ for(const mobile of [false,true]){ const T=mobile?'[mobile] ':''; const sfx=mobi
   await hclick('.relmenu [data-act="relLabel"]'); await W(250); await p.fill('#pr-in','同一位負責人'); await hclick('[data-act="promptOk"]'); await W(300);
   r=await R(); ok(T+'rel: optional label saved and drawn',r.rels[0].label==='同一位負責人'&&/同一位負責人/.test(await p.locator('#mapsvg').textContent()));
   await selectNode('r'); ok(T+'rel: selecting a node deselects the line',await p.locator('#mapsvg g.rel.sel').count()===0);
+  { const lb=await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.rellbl'), st=document.getElementById('stage').getBoundingClientRect(); const b=g.getBoundingClientRect(); return {l:b.left-st.left,r:st.right-b.right,t:b.top-st.top,b:st.bottom-b.bottom,title:g.querySelector('title')&&g.querySelector('title').textContent}; });
+    ok(T+'rel label stays inside the visible canvas (≥8px margin) and keeps the full text as a tooltip',lb.l>=7.5&&lb.r>=7.5&&lb.t>=7.5&&lb.b>=7.5&&lb.title==='同一位負責人',JSON.stringify(lb));
+    const cc=await p.evaluate(()=>{ const rel=document.querySelector('#mapsvg g.rel:not(.sel):not(.rellbl) path[data-g=rel]').getAttribute('stroke'); const tree=[...document.querySelectorAll('#mapsvg .edges path')].map(e=>e.getAttribute('stroke')).find(Boolean); return {rel,tree}; });
+    const {cr}=await import('../js/core.js');
+    ok(T+'unselected relationship line uses its own colour (not the tree line colour), ≥3:1 on white and on 蜜桃 canvas',cc.rel&&cc.tree&&cc.rel.toLowerCase()!==cc.tree.toLowerCase()&&cr(cc.rel,'#FFFFFF')>=3&&cr(cc.rel,'#FFF1E6')>=3,JSON.stringify(cc)); }
   await shot('09-rel-label');
   // flip
   await tap(mid); await W(300); await hclick('.relmenu [data-act="relFlip"]'); r=await R(); ok(T+'rel: flip swaps the arrow',r.rels[0].a==='e'&&r.rels[0].b==='b');
