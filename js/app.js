@@ -99,6 +99,8 @@ function applyInsets(){ const cv=$('#cv'), st=$('#stage'); if(!cv) return; const
   st.style.inset=`${ins.top}px ${ins.right}px ${ins.bottom}px ${ins.left}px`; S.safe=ins; window.__SAFE=ins; }
 function laidOut(){ const doc=S.preview?S.preview.doc:S.doc; const r=layout(clone(doc.root),th(),doc.settings||{}); const by=new Map(); allDeep(r).forEach(n=>by.set(n.id,n)); return {r,by}; }
 function initialView(r){ const st=$('#stage'), W=st.clientWidth, H=st.clientHeight, m=isM(), b=bounds(r), PAD=m?16:28, big=all(r).length>120;
+  // 經典蜜桃: open at 100% like the classic editor does: whole map centred when it fits, else its top-left corner in view
+  if(r.cl){ const sc=m?.8:1, fits=b.w*sc<=W-2*PAD&&b.h*sc<=H-2*PAD; return fits?{sc,tx:W/2-(b.x0+b.w/2)*sc,ty:H/2-(b.y0+b.h/2)*sc}:{sc,tx:(m?PAD:60)-b.x0*sc,ty:(m?84:24)-b.y0*sc}; }
   if(r.layout==='balanced'||r.layout==='org'){ const sc=Math.max(m?.62:.5,Math.min(1,(W-2*PAD)/b.w,(H-2*PAD)/b.h)); const tx=b.w*sc<=W-2*PAD?W/2-(b.x0+b.w/2)*sc:W/2-r.x*sc;
     let ty=r.layout==='org'?(b.h*sc<=H-2*PAD?H/2-(b.y0+b.h/2)*sc:PAD-b.y0*sc):(b.h*sc<=H-2*PAD?H/2-(b.y0+b.h/2)*sc:H/2-r.y*sc);
     // phone + org chart wider than the screen: start at the top-left (first branch and the root in view), pan right for more
@@ -221,7 +223,7 @@ function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector(
   const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, W=o.clientWidth||innerWidth, w=tb.offsetWidth||140; let x=Math.max(8,Math.min(W-w-8,cx-w/2)), y=top-54; if(y<64) y=ty+(n.y+n.h/2)*sc+10;
   tb.style.left=x+'px'; tb.style.top=y+'px'; }
 function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
-  const fs=n.d===0?22:n.d===1?16:14; Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(isM()?16:14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
+  const fs=n.fs||(n.d===0?22:n.d===1?16:14); Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(isM()?16:14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
 function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
   if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); afterEdit(); }
 function cancelEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; edEl=null; ta&&ta.remove(); dbg('editor cancel'); afterEdit(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
@@ -501,6 +503,8 @@ async function applyConflict(){ const D=S.dialog; const {id,pick,theirs,mine,bas
     maps.save(id,doc); maps.saveBase(id,theirs); maps.setMeta(id,{...metaFrom(doc),sha:remoteSha,dirty:true}); if(S.mapId===id) S.doc=doc; }
   render(); await syncNow({reason:'conflict'}); }
 addEventListener('online',()=>{ if(remote()) syncAll(); });
+// 經典蜜桃 theme: its fonts arrive after the first layout, so lay the map out again once they are in
+addEventListener('mm-classic-fonts',()=>{ if(S.doc&&th().engine==='classic'&&S.view==='editor') drawMap(); });
 addEventListener('offline',()=>{ if(remote()) setSync('offline'); });
 setInterval(()=>{ if(remote()&&document.visibilityState==='visible') syncNow({push:false,reason:'auto'}); },5*60000); // pull only
 // auto mode: flush when the tab is hidden or closed (best effort; anything left is pushed on the next visit)

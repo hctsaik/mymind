@@ -1,5 +1,6 @@
 // Layout + SVG rendering for the right-expanding logic chart (DESIGN §7). Pure functions: data in, SVG string out.
 import { readable, cr, lum, mix, tint, esc, PRI, P } from './core.js';
+import { clLayout, clNodeSvg, clEdges } from './classic.js';
 const mctx=document.createElement('canvas').getContext('2d');
 export const FF='"Noto Sans TC","Noto Sans CJK TC","PingFang TC","Microsoft JhengHei",sans-serif';
 const twc=new Map();
@@ -62,6 +63,7 @@ function placeOrg(root){ root.x=0; root.y=0; root.side=0; const k=kids(root); if
   k.forEach((c,i)=>{ c.x=x+c.w/2; c.y=top+hmax/2; c.side=3; const yRef={y:top+hmax+ORG.rg+4}; orgCol(c,x,ORG.ind,yRef); x+=ws[i]+ORG.hg; }); }
 export const LAYOUTS=[['right','向右邏輯圖'],['balanced','左右心智圖'],['org','組織圖']];
 export function layout(root,th,st={}){
+  if(th.engine==='classic') return clLayout(root,th,st);
   const boxed=!!th.deepBox; const [hg,g]=SPACING[st.spacing||'standard']||SPACING.standard; const mode=['balanced','org'].includes(st.layout)?st.layout:'right';
   prep(root,0,0,boxed,th,null); root.boxed=boxed; root.layout=mode;
   if(mode==='balanced') placeBalanced(root,hg,g);
@@ -90,6 +92,7 @@ export function renderMap(root,th,opt={}){
   // minimum visual line width: never thinner than 1.5 CSS px on screen, whatever the zoom (review r4 dev-suggestion 3)
   const minW=opt.sc?1.5/opt.sc:0;
   const ORGM=root.layout==='org';
+  if(root.cl) edges=clEdges(nodes,th); else
   nodes.forEach(n=>[...kids(n)].sort((a,b)=>Math.abs(b.y-n.y)-Math.abs(a.y-n.y)).forEach(c=>{
     const col=colorOf(c,th); let p='';
     const s=c.side===-1?-1:1, plainOff=(m)=>th.deep==='plain'&&m.d>=2?(m.padX-5):0;
@@ -110,6 +113,7 @@ export function renderMap(root,th,opt={}){
   }));
   const R=relsSvg(root,th,opt,{CV,G,SEL,minW}); defs+=R.defs; edges+=R.lines;
   nodes.forEach(n=>{
+    if(root.cl){ const C=clNodeSvg(n,th); body+=overlays(n,C.g,C.rx,root,th,opt,{CV,SEL,SELK,nodeBg,col:th.line}); return; }
     const col0=colorOf(n,th), col=n.d===0?th.root:brC(n), x=n.x-n.w/2, y=n.y-n.h/2, d=n.d; let g='';
     let fill='none',stroke='none',txt=th.text,sw=0,rx=8,fw=d===0?700:d===1?600:400, bgc=CV;
     if(d===0){fill=th.root;txt=th.rootText;rx=th.rootPill?n.h/2:14;bgc=fill;}
@@ -160,6 +164,18 @@ export function renderMap(root,th,opt={}){
   });
   return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>${defs}</defs><g class="edges">${edges}</g>${body}${R.labels}`,b:relBounds(root,bounds(root))};
 }
+// selection / find / drop / collapse overlays for the classic engine (same look as the default renderer)
+function overlays(n,g,rx,root,th,opt,{CV,SEL,SELK,nodeBg,col}){ const x=n.x-n.w/2, y=n.y-n.h/2, d=n.d;
+  if(n.collapsed&&n.c&&n.c.length){ const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
+    g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點"><circle data-g="collapse" data-gbg="${CV}" cx="${ccx}" cy="${ccy}" r="10" fill="${nodeBg}" stroke="${readable(col,CV,3)}" stroke-width="1.6"/><text x="${ccx}" y="${ccy+4}" font-size="11.5" font-weight="700" fill="${cfg}" data-bg="${nodeBg}" text-anchor="middle">${countDesc(n)}</text></g>`;}
+  if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
+  if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
+    g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
+  if(opt.sel===n.id&&!opt.thumb){
+    g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
+    const hx=n.x+(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
+    g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
+  return `<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`; }
 export function thumbSvg(data,th,pad=30,st={}){const r=layout(JSON.parse(JSON.stringify(data)),th,st);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}
 export function themeThumb(th){const c=th.br, g=x=>readable(x,th.canvas,3), gb=`data-gbg="${th.canvas}"`;
   return `<svg viewBox="0 0 120 62" aria-hidden="true"><rect width="120" height="62" fill="${th.canvas}"/>

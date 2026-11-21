@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><title>classic render harness</title>
+<style>html,body{margin:0;overflow:hidden;width:100%;height:100%}svg{display:block;position:fixed;inset:0;width:100vw;height:100vh}</style></head><body>
+<svg id="s" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><rect id="bg" width="100%" height="100%"/><g id="vp"></g></svg>
+<script type="module">
+import { layout, renderMap, all } from '../js/mapview.js';
+import { THEMES } from '../js/core.js';
+import { classicFontsReady } from '../js/classic.js';
+window.renderDoc=(doc,tx=0,ty=0,sc=1,opt={})=>{ const th=THEMES[doc.theme]; const r=layout(JSON.parse(JSON.stringify(doc.root)),th,doc.settings||{});
+  const {svg,b}=renderMap(r,th,opt); document.getElementById('bg').setAttribute('fill',th.canvas);
+  const vp=document.getElementById('vp'); vp.innerHTML=svg; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`);
+  return {b,nodes:all(r).map(n=>({id:n.id,x:n.x,y:n.y,w:n.w,h:n.h,t:n.t}))}; };
+window.fontsReady=t=>classicFontsReady(t);
+window.ready=true;
+</script></body></html>

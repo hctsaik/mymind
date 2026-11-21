@@ -40,6 +40,7 @@ export const THEMES={
  business:{rel:'#9333EA',name:'商務',root:'#1F3A5F',rootText:'#FFFFFF',br:['#3D5A80','#2A9D8F','#E76F51','#5C677D','#264653','#C08A2D'],l1:'outline',text:'#1F2937',canvas:'#F4F6F9',dot:'#D6DCE4'},
  forest:{rel:'#6D28D9',name:'森林',root:'#2D6A4F',rootText:'#FFFFFF',br:['#40916C','#2F9E8F','#7A9E3D','#B5838D','#6D8B74','#C9A227'],l1:'tint',text:'#1E2B24',canvas:'#F3F7F2',dot:'#D3DFD2'},
  midnight:{rel:'#F0ABFC',name:'夜幕',root:'#7C8CFF',rootText:'#0E1020',br:['#7C8CFF','#3DDC97','#FFC857','#FF6B8B','#B794F6','#4FD1C5'],l1:'tintDark',text:'#E8EAF0',canvas:'#121418',dot:'#2A2E37',dark:true},
+ classic:{rel:'#0F7B8A',name:'經典蜜桃',engine:'classic',root:'#FFBB91',rootText:'#FFFFFF',rootPill:true,flatRoot:true,br:['#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E'],l1:'box',l1Stroke:'#FFBB91',deep:'plain',edge:'bracket',line:'#FF8E6E',lineLight:'#FF8E6E',lw:2,hl:'#FFE27A',text:'#000000',canvas:'#FFF1E6',dot:'#FFF1E6'},
  minimal:{rel:'#0F7B8A',name:'極簡',root:'#111111',rootText:'#FFFFFF',br:['#111111','#3A3A3A','#111111','#3A3A3A','#111111','#3A3A3A'],l1:'outline',text:'#111111',canvas:'#FFFFFF',dot:'#E5E5E5'}
 };
 export const PRI={1:'#C53030',2:'#B45309',3:'#3F51E8',4:'#0E7A56',5:'#57534E'};
