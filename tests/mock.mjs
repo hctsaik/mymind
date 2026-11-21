@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 // ---- mock GitHub repo state ----
 export function mockGH(){ const files=new Map(); const commits=[]; let fail=null;
   const sha=t=>crypto.createHash('sha1').update(t).digest('hex');
-  const handler=async route=>{ const req=route.request(); const u=new URL(req.url()); const m=req.method(); const p=decodeURIComponent(u.pathname);
+  const handler=async route=>{ await new Promise(r=>setTimeout(r,+(process.env.GH_LATENCY??250))); const req=route.request(); const u=new URL(req.url()); const m=req.method(); const p=decodeURIComponent(u.pathname);
     const json=(s,o)=>route.fulfill({status:s,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(o)});
     if(m==='OPTIONS') return route.fulfill({status:204,headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'*'}});
     if(fail) { const f=fail; fail=null; return json(f.status,{message:f.message}); }

@@ -265,7 +265,11 @@ const pathOf=id=>`maps/${id}.json`;
 const pushT=new Map();
 function schedulePush(id,ms=3000){ clearTimeout(pushT.get(id)); pushT.set(id,setTimeout(()=>pushNow(id),ms)); }
 function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='saved'?new Date().toISOString():S.sync.at}; drawChrome(); }
-async function pushNow(id){ clearTimeout(pushT.get(id)); const c=gh(); if(!c){ if(S.mode==='github') setSync('error','還沒設定金鑰'); return; }
+const inflight=new Map();
+async function pushNow(id){ clearTimeout(pushT.get(id)); if(inflight.has(id)){ inflight.set(id,true); return inflight.get(id+':p'); }
+  inflight.set(id,false); let done; inflight.set(id+':p',new Promise(r=>done=r));
+  try{ await pushOnce(id); } finally { const again=inflight.get(id); inflight.delete(id); inflight.delete(id+':p'); done(); if(again) await pushNow(id); } }
+async function pushOnce(id){ const c=gh(); if(!c){ if(S.mode==='github') setSync('error','還沒設定金鑰'); return; }
   const doc=maps.load(id), meta=maps.meta(id); if(!doc||!meta) return;
   if(!navigator.onLine){ setSync('offline'); return; }
   const isCur=S.doc&&S.doc.id===id; if(isCur) setSync('saving');
