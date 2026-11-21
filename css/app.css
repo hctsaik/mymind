@@ -625,3 +625,16 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .installnote .iic{color:#fff}
 @media (max-width:480px){.updbar .ux{display:none}.updbar>span{flex:1}}
 .installnote .iic svg{stroke:#fff;stroke-width:1.8;fill:none;stroke-linecap:round}
+/* v1.3.2 hotfix: phone top bar fits 5 round buttons + the back pill at 360–430px (title shrinks with an ellipsis) */
+@media (max-width:768px){
+  .top.flt .backpill{flex:0 1 auto;min-width:0;max-width:calc(100vw - 16px - 6px - 5*46px - 4*6px)}
+  .top.flt .right-actions{flex:none}
+  .top.flt .right-actions .rb{width:46px;height:46px;min-width:46px}
+}
+/* v1.3.2 hotfix: floating bar over the selected node on phones (✏️ 編輯 opens the keyboard) */
+.nodetb{display:none}
+@media (max-width:768px){
+  .nodetb{position:absolute;z-index:5;display:flex;gap:4px;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 4px 14px rgba(31,35,41,.18)}
+  .nodetb .btn{height:44px;min-width:44px;padding:0 12px;gap:6px;font-size:14px;font-weight:600;border:0;background:transparent;color:var(--text)}
+  .nodetb .btn:first-child{color:var(--accent)}
+}

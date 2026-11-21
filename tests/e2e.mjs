@@ -414,7 +414,7 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   await p.keyboard.press('Escape'); await W(150);
   ok('Esc closes search, focus back to canvas, highlights gone', await p.locator('#findbar').count()===0&&await p.evaluate(()=>document.activeElement.id==='cv')&&await p.locator('#mapsvg rect.findhit').count()===0);
   ok('searching adds no undo steps', await p.evaluate(()=>window.__mm.undo.length)===u0);
-  await p.keyboard.press('?'); await W(150); const kbt=await p.locator('.dlg').textContent(); ok('shortcuts dialog lists Ctrl+F, F3 and the version', kbt.includes('Ctrl+F')&&kbt.includes('F3')&&kbt.includes('v1.3.0')); await p.keyboard.press('Escape'); await W(100);
+  await p.keyboard.press('?'); await W(150); const kbt=await p.locator('.dlg').textContent(); ok('shortcuts dialog lists Ctrl+F, F3 and the version', kbt.includes('Ctrl+F')&&kbt.includes('F3')&&/v1\.\d+\.\d+/.test(kbt)); await p.keyboard.press('Escape'); await W(100);
   await p.keyboard.press('F3'); await W(100); ok('F3 opens search too', await p.locator('#findbar').count()===1); await p.keyboard.press('Escape'); await W(100);
   await p.click('.tb [data-act="find"]'); await W(100); ok('toolbar 搜尋 button opens search', await p.locator('#findbar').count()===1); await p.click('[data-act="findClose"]'); await W(100);
   // export menu: PNG / SVG / PDF
