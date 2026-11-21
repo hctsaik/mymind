@@ -58,6 +58,15 @@ for(const [w,h] of [[1440,900],[390,844]]){
     await selectL1(p); await act(p,'ai').catch(()=>act(p,'aiExpand')); await audit(p,'ai-dialog'); await act(p,'aiRun'); await audit(p,'ai-nokey'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
     await act(p,'settings').catch(async()=>{ await act(p,'moreMenu'); await act(p,'settings'); }); await p.click('#st-gh'); await p.waitForTimeout(150); await audit(p,'settings-gh'); await p.click('#st-a11y'); await p.waitForTimeout(150); await audit(p,'settings-a11y'); await p.keyboard.press('Escape');
     await p.ctx.close(); }
+  // v1.5: AI preview + relationship lines (bar, selected line with label, line menu, outline indicator)
+  { const d=docOf(trip()); const r=d.root; r.rels=[{id:'ra',a:r.c[0].c[0].id,b:r.c[1].c[2].id,label:'順路吃'},{id:'rb',a:r.c[2].id,b:r.c[3].c[1].id}];
+    const p=await page(w,h,{docs:[d],hash:'#/map/'+d.id}); await audit(p,'rels');
+    await p.evaluate(()=>localStorage.setItem('mymind.openai',JSON.stringify('sk-test-FAKE')));
+    await selectL1(p); await p.keyboard.press('Control+j'); await p.waitForTimeout(300); await audit(p,'ai-expand-form'); await act(p,'aiRun'); await p.waitForTimeout(800); await audit(p,'ai-preview'); await act(p,'closeDialog').catch(()=>p.keyboard.press('Escape')); await p.waitForTimeout(200);
+    await selectL1(p); await act(p,'relStart').catch(async()=>{ await act(p,w<700?'moreMenu':'nodeMenu'); await act(p,'relStart'); }); await p.waitForTimeout(200); await audit(p,'rel-pick'); await act(p,'relCancel'); await p.waitForTimeout(150);
+    await p.evaluate(()=>{ const S=window.__mm; S.sel=S.doc.root.c[0].c[0].id; }); await act(p,'relOf').catch(async()=>{ await p.evaluate(()=>{ const S=window.__mm; const id=S.sel; const el=[...document.querySelectorAll('#mapsvg g.node')].find(g=>g.dataset.id===id); el&&el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:200,clientY:200})); }); await p.waitForTimeout(200); await act(p,'relOf'); });
+    await p.waitForTimeout(300); await audit(p,'rel-menu'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+    await act(p,'outline'); await audit(p,'outline-rels'); await p.ctx.close(); }
   // dark UI
   { const p=await page(w,h,{prefs:{mode:'local',ui:'dark'},docs,hash:'#/map/'+docs[2].id}); await audit(p,'dark-editor'); await act(p,'style'); await audit(p,'dark-style'); await p.keyboard.press('Escape'); await act(p,'mdImport').catch(async()=>{ await act(p,p.viewportSize().width<700?'moreMenu':'exportMenu'); await act(p,'mdImport'); }); await p.fill('#md-in','# 深色\n- a\n  - [x] b'); await p.waitForTimeout(150); await audit(p,'dark-md-dialog'); await p.keyboard.press('Escape'); await p.goto(BASE+'#/'); await p.waitForTimeout(300); await audit(p,'dark-list'); await p.ctx.close(); }
   // settings: storage tab; manual sync with unsynced badge

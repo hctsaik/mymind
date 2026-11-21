@@ -264,7 +264,7 @@ export function aiDialog(S,A,selNode,root){ const tabs=[['topic','輸入主題',
   const ML={new:'新增',moved:'移動',group:'新分組',note:'詳情',ctx:''};
   const result=R?`<section class="aires" aria-labelledby="ai-res-h"><h4 id="ai-res-h">${I('check')}預覽變更</h4><p class="aistat">${esc(R.stat)}</p>
     <ul class="difftree">${R.rows.map(r=>`<li class="dr m-${r.m}${r.more?' more':''}" style="--d:${r.d}">${ML[r.m]?`<span class="dm">${ML[r.m]}</span>`:''}<span class="dt">${esc(r.t)}</span></li>`).join('')}</ul>
-    <p class="panel-note aiundo">${R.newMap?'會建立一張新圖，原本的圖不受影響。':'按「'+esc(R.ok)+'」後是一個步驟，可以用 Ctrl+Z 或「復原」還原。'}</p></section>`:'';
+    <p class="panel-note aiundo">${R.newMap?'會建立一張新圖，原本的圖不受影響。':'按「'+esc(R.ok)+'」後是一個步驟，'+(isMobile()?'可以按「復原」還原。':'可以用 Ctrl+Z 或「復原」還原。')}</p></section>`:'';
   const busyTxt={topic:'產生中…',notes:'整理文章中…',expand:'發想子主題中…',summary:'摘要中…',regroup:'分組中…'}[A.tab];
   return `<div class="scrim" data-act="scrim"><div class="modal aimodal" role="dialog" aria-modal="true" aria-labelledby="ai-h">
    <div class="mhead"><div class="spark" aria-hidden="true">${I('spark')}</div><div><h3 id="ai-h">AI 助手</h3><p>用你的 OpenAI 金鑰，在瀏覽器直接處理；先預覽再決定</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>

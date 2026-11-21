@@ -196,7 +196,7 @@ function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id);
   ta.addEventListener('blur',()=>setTimeout(()=>{ if(S.editing&&S.editing.id===id&&document.activeElement!==ta) commitEdit(); },0)); }
 // phones: a small floating bar over the selected node — ✏️ 編輯 opens the editor from a real tap (keyboard shows), ⋯ the node menu
 function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector('.nodetb'); const n=lay&&S.sel&&lay.by.get(S.sel);
-  if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.view!=='editor'){ tb&&tb.remove(); return; }
+  if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.relPick||S.view!=='editor'){ tb&&tb.remove(); return; }
   if(!tb){ o.insertAdjacentHTML('beforeend',`<div class="nodetb" role="toolbar" aria-label="選取的節點"><button class="btn" data-act="edit" aria-label="編輯文字">${I('edit')}<span>編輯</span></button><button class="btn" data-act="nodeMenuTb" aria-label="更多節點動作">${I('more')}</button></div>`); tb=o.querySelector('.nodetb'); }
   const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, W=o.clientWidth||innerWidth, w=tb.offsetWidth||140; let x=Math.max(8,Math.min(W-w-8,cx-w/2)), y=top-54; if(y<64) y=ty+(n.y+n.h/2)*sc+10;
   tb.style.left=x+'px'; tb.style.top=y+'px'; }
@@ -400,7 +400,7 @@ function relPickTo(id){ const from=S.relPick&&S.relPick.from; if(!from) return; 
   S.relPick=null; const ex=relsOf(S.doc.root).find(r=>r.a===from&&r.b===id||r.a===id&&r.b===from);
   if(ex){ S.selRel=ex.id; S.sel=id; drawAll(); toast('這兩個節點已經有關聯線'); return; }
   const rid='r'+newId(); mutate(r=>{ (r.rels=r.rels||[]).push({id:rid,a:from,b:id}); },{select:id}); S.selRel=rid; drawMap(); toast('已新增關聯線',['加標籤','relLabel']); }
-function relClick(id,x,y){ if(!relById(id)) return; S.selRel=id; drawMap(); openRelMenu(id,x,y); }
+function relClick(id,x,y){ if(!relById(id)) return; S.selRel=id; drawMap(); openRelMenu(id,x,y); if(MENU) MENU.lp=true; /* ignore the click the finger's release fires */ }
 function openRelMenu(id,x,y){ const r=relById(id); if(!r) return; const A=find(S.doc.root,r.a), B=find(S.doc.root,r.b);
   openMenu(`<div class="ctx relmenu" role="menu" aria-label="關聯線：${esc(A?A.n.t:'')} → ${esc(B?B.n.t:'')}"><div class="lphead" aria-hidden="true">${esc(A?A.n.t:'')} → ${esc(B?B.n.t:'')}</div>${mi('relLabel','edit',r.label?'編輯標籤':'加標籤')}${mi('relFlip','redo','反轉箭頭方向')}<hr>${mi('relDel','trash','刪除關聯線','del')}</div>`,$('#cv'),{x:x-20,y:y+12,yAbove:y-12}); }
 async function relLabel(id=S.selRel){ const r=relById(id); if(!r) return; closeMenu(); const v=await askText('關聯線標籤','標籤（可留空，最多 40 字）',r.label||''); if(v===null) return;

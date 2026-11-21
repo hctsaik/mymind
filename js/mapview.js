@@ -173,8 +173,14 @@ export const relsOf=root=>Array.isArray(root.rels)?root.rels.filter(r=>r&&r.id&&
 const RELF=`600 12.5px ${FF}`;
 function edgePt(n,tx,ty){ const dx=tx-n.x, dy=ty-n.y; if(!dx&&!dy) return [n.x,n.y]; const k=Math.min((n.w/2+4)/Math.abs(dx||1e-9),(n.h/2+4)/Math.abs(dy||1e-9)); return [n.x+dx*k,n.y+dy*k]; }
 // geometry for one relationship: a gentle cubic curve bowed to one side, starting/ending on the node boxes
-export function relGeom(A,B){ const ax=A.x,ay=A.y,bx=B.x,by=B.y, dx=bx-ax, dy=by-ay, L=Math.hypot(dx,dy)||1; let nx=-dy/L, ny=dx/L; if(ny>0||(Math.abs(ny)<1e-6&&nx<0)){nx=-nx;ny=-ny;}
-  const h=Math.min(150,L*.28)+24, c1=[ax+dx/3+nx*h,ay+dy/3+ny*h], c2=[ax+dx*2/3+nx*h,ay+dy*2/3+ny*h];
+export function relGeom(A,B,nodes=[]){ const ax=A.x,ay=A.y,bx=B.x,by=B.y, dx=bx-ax, dy=by-ay, L=Math.hypot(dx,dy)||1; let nx=-dy/L, ny=dx/L, h;
+  if(Math.abs(dx)<(A.w+B.w)/2){ // stacked (same column): bow outwards, clear of the column's widest box
+    const out=(A.side===-1&&B.side===-1)?-1:1; if(Math.sign(nx)!==out){nx=-nx;ny=-ny;} h=Math.max(Math.min(150,L*.28)+24,Math.max(A.w,B.w)/2+40);
+    // clear every box stacked between the two ends (they can be wider than the ends): the curve's peak is ~.75h from the chord
+    const y0=Math.min(ay,by), y1=Math.max(ay,by), cx=(ax+bx)/2; let edge=null; nodes.forEach(n=>{ if(n===A||n===B||n.x===undefined||n.y<=y0||n.y>=y1) return; if(Math.abs(n.x-cx)>n.w/2+Math.max(A.w,B.w)) return; const e=out>0?n.x+n.w/2:n.x-n.w/2; edge=edge===null?e:(out>0?Math.max(edge,e):Math.min(edge,e)); });
+    if(edge!==null) h=Math.max(h,(Math.abs(edge-cx)+18)/.75); }
+  else { if(ny>0||(Math.abs(ny)<1e-6&&nx<0)){nx=-nx;ny=-ny;} h=Math.min(80,L*.18)+16; } // side by side: a low arc above, under the parent row gap
+  const c1=[ax+dx/3+nx*h,ay+dy/3+ny*h], c2=[ax+dx*2/3+nx*h,ay+dy*2/3+ny*h];
   const p0=edgePt(A,c1[0],c1[1]), p3=edgePt(B,c2[0],c2[1]); const mid=[(p0[0]+3*c1[0]+3*c2[0]+p3[0])/8,(p0[1]+3*c1[1]+3*c2[1]+p3[1])/8];
   return {d:`M${p0[0].toFixed(1)},${p0[1].toFixed(1)} C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p3[0].toFixed(1)},${p3[1].toFixed(1)}`,mid,box:[Math.min(p0[0],p3[0],mid[0]),Math.min(p0[1],p3[1],mid[1]),Math.max(p0[0],p3[0],mid[0]),Math.max(p0[1],p3[1],mid[1])]}; }
 function relEnds(root){ const vis=new Set(all(root).map(n=>n.id)), by=new Map(); allDeep(root).forEach(n=>by.set(n.id,n));
@@ -185,10 +191,10 @@ function relsSvg(root,th,opt,{CV,G,SEL,minW}){ const list=relEnds(root); if(!lis
   const col=G(relAccent(th)), key=col.slice(1), selC=SEL; let lines='',labels='';
   const defs=`<marker id="rela-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${col}"/></marker><marker id="relas-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${selC}"/></marker>`;
   const hitW=Math.max(12,(opt.mobile?30:16)/(opt.sc||1));
-  list.forEach(({r,A,B,hidden})=>{ const g=relGeom(A,B), sel=opt.selRel===r.id&&!opt.thumb, c=sel?selC:col, w=Math.max(sel?2.6:1.8,minW);
+  const vis=all(root); list.forEach(({r,A,B,hidden})=>{ const g=relGeom(A,B,vis), sel=opt.selRel===r.id&&!opt.thumb, c=sel?selC:col, w=Math.max(sel?2.6:1.8,minW);
     const lbl=String(r.label||'').trim(), name=`關聯線：${A.t||''} → ${B.t||''}${lbl?'（'+lbl+'）':''}${hidden?'，端點在收合的分支裡':''}`;
     lines+=`<g class="rel${sel?' sel':''}" data-rel="${esc(r.id)}" role="button" aria-label="${esc(name)}"${hidden?' opacity=".6"':''}>${opt.thumb?'':`<path class="relhit" d="${g.d}" fill="none" stroke="transparent" stroke-width="${hitW.toFixed(1)}"/>`}${sel?`<path d="${g.d}" fill="none" stroke="${selC}" stroke-opacity=".18" stroke-width="${(w+6).toFixed(1)}" stroke-linecap="round"/>`:''}<path data-g="rel" data-gbg="${CV}" d="${g.d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}" stroke-dasharray="7 5" stroke-linecap="round" marker-end="url(#${sel?'relas':'rela'}-${key})"/></g>`;
     if(lbl){ const t=lbl.length>24?lbl.slice(0,23)+'…':lbl, tw0=tw(t,RELF), W=tw0+18, H=24, x=g.mid[0]-W/2, y=g.mid[1]-H/2, tc=readable(th.text,CV,4.5);
       labels+=`<g class="rel rellbl${sel?' sel':''}" data-rel="${esc(r.id)}" aria-hidden="true"><rect data-g="rel" data-gbg="${CV}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${W.toFixed(1)}" height="${H}" rx="12" fill="${CV}" stroke="${c}" stroke-width="${sel?2:1.2}"/><text x="${g.mid[0].toFixed(1)}" y="${(g.mid[1]+4.4).toFixed(1)}" font-size="12.5" font-weight="600" fill="${tc}" data-bg="${CV}" text-anchor="middle">${esc(t)}</text></g>`; } });
   return {defs,lines,labels}; }
-function relBounds(root,b){ const list=relEnds(root); if(!list.length) return b; let {x0,y0,x1,y1}=b; list.forEach(({A,B,r})=>{ const g=relGeom(A,B); const lw=r.label?tw(String(r.label).slice(0,24),RELF)/2+12:0; x0=Math.min(x0,g.box[0]-lw); y0=Math.min(y0,g.box[1]-14); x1=Math.max(x1,g.box[2]+lw); y1=Math.max(y1,g.box[3]+14); }); return {x0,y0,x1,y1,w:x1-x0,h:y1-y0}; }
+function relBounds(root,b){ const list=relEnds(root); if(!list.length) return b; let {x0,y0,x1,y1}=b; const vis=all(root); list.forEach(({A,B,r})=>{ const g=relGeom(A,B,vis); const lw=r.label?tw(String(r.label).slice(0,24),RELF)/2+12:0; x0=Math.min(x0,g.box[0]-lw); y0=Math.min(y0,g.box[1]-14); x1=Math.max(x1,g.box[2]+lw); y1=Math.max(y1,g.box[3]+14); }); return {x0,y0,x1,y1,w:x1-x0,h:y1-y0}; }

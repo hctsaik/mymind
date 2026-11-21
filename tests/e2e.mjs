@@ -243,11 +243,13 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   ok('AI 401 shows key error', /金鑰|401/.test(alertTxt), alertTxt.slice(0,60));
   await p.screenshot({path:SHOTS+'/08-ai-error.png'});
   setAiMode('ok'); await p.click('[data-act="aiRun"]'); await W(700);
+  ok('AI generate shows preview with 接受', await p.locator('.dlg [data-act="aiAccept"]').count()===1);
+  await p.click('.dlg [data-act="aiAccept"]'); await W(400);
   ok('AI generate creates map', await p.evaluate(()=>window.__mm.doc&&window.__mm.doc.root.t==='日本旅遊計畫'));
   ok('AI request uses gpt-4o-mini + bearer key', aiCalls.at(-1).model==='gpt-4o-mini'&&aiCalls.at(-1).auth==='Bearer sk-fake-key-123');
   await p.evaluate(()=>{const S=window.__mm; S.sel=S.doc.root.c[1].id;}); await p.locator('#cv').focus();
   await p.keyboard.press('Control+j'); await W(250);
-  const inExpand=await p.locator('[data-ai="hint"]').count(); if(inExpand) await p.click('[data-act="aiRun"]'); await W(700);
+  const inExpand=await p.locator('[data-ai="hint"]').count(); if(inExpand){ await p.click('[data-act="aiRun"]'); await W(700); await p.click('.dlg [data-act="aiAccept"]'); } await W(400);
   ok('AI expand node adds children', await p.evaluate(()=>window.__mm.doc.root.c[1].c.length)===6);
   await p.screenshot({path:SHOTS+'/09-ai-map-desktop.png'});
   // trash & restore
