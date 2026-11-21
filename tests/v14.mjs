@@ -47,11 +47,16 @@ for(const mobile of [false,true]){ const tag=mobile?'[mobile] ':'';
   await click('.csw[data-v="0"]'); await W(250);
   r=await R(); const c=r.c.find(n=>n.id==='c');
   ok(tag+'tag, link (https added) and colour saved',JSON.stringify(c.tags)==='["重要"]'&&c.link==='https://example.com/x'&&c.color===0,JSON.stringify(c));
-  ok(tag+'map shows the tag chip and link icon',await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.node[data-id="c"]'); return /#重要/.test(g.textContent)&&!!g.querySelector('a.linkic[href="https://example.com/x"]'); }));
+  ok(tag+'map shows the tag chip and link icon',await p.evaluate(()=>{ const g=document.querySelector('#mapsvg g.node[data-id="c"]'); return /#重要/.test(g.textContent)&&!!g.querySelector('a.linkic[href="https://example.com/x"],g.linkic[data-link="c"]'); }));
   await p.fill('#linkin','javascript:alert(1)'); await p.keyboard.press('Enter'); await W(250); r=await R();
   ok(tag+'non-web links are refused',r.c.find(n=>n.id==='c').link==='https://example.com/x');
+  ok(tag+'colour swatches show their names',(await p.locator('.csw span').allTextContents()).join('')==='自動紅橙黃綠藍紫');
   await p.fill('#imgurl','https://example.com/a.jpg'); await p.keyboard.press('Enter'); await W(300); r=await R();
   ok(tag+'image by web address (size read from the image)',r.c.find(n=>n.id==='c').img?.src==='https://example.com/a.jpg'&&r.c.find(n=>n.id==='c').img.w===300);
+  if(mobile){ await p.evaluate(()=>{ [...document.querySelectorAll('#panelHost button[aria-label*="關閉"]')][0]?.click(); }); await W(300); await p.evaluate(()=>{ window.__mm.sel='r'; }); await W(100);
+    const r2=await p.evaluate(()=>{ const g=document.querySelector('#mapsvg [data-link="c"]'); if(!g) return null; const b=g.getBoundingClientRect(); return [b.x+b.width/2,b.y+b.height/2,b.width,b.height]; });
+    ok(tag+'phone: link icon has a 44px tap area',r2&&r2[2]>=44&&r2[3]>=44,JSON.stringify(r2));
+    if(r2){ await p.touchscreen.tap(r2[0],r2[1]); await W(700); const st=await p.evaluate(()=>[!!document.querySelector('.nsheet'),document.activeElement?.id,window.__mm.sel,document.elementFromPoint(0,0)&&0]); ok(tag+'phone: tapping the link icon opens details at the link field',st[0]&&st[1]==='linkin'&&st[2]==='c',JSON.stringify(st)+' at '+JSON.stringify(r2)); } }
   // icon picker
   await p.evaluate(()=>{ window.__mm.panel=''; }); await p.keyboard.press('Escape'); await W(150);
   await p.evaluate(()=>window.__mm.sel='d'); await p.keyboard.press('Alt+i'); await W(300);

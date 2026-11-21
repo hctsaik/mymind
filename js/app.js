@@ -170,6 +170,8 @@ function openFind(){ if(S.view!=='editor'||!S.doc) return; if(S.editing) commitE
   const q=$('#findq'); if(q){ q.focus(); q.select(); } }
 function closeFind(){ if(!S.find) return; S.find=null; $('#findbar')?.remove(); $$('[data-act="find"]').forEach(b=>b.setAttribute('aria-pressed','false')); drawMap(); $('#cv')?.focus({preventScroll:true}); }
 function updateFindCount(){ const c=$('#findcount'); if(c) c.textContent=V.findCount(S.find); }
+// open the node details panel, optionally scrolled to one section (phone: tap on a node's link icon)
+function openDetails(sec){ if(!S.doc||!selInfo()) return; S.panel='note'; render(); setTimeout(()=>{ revealAboveSheet(S.sel); if(sec){ const el=$(`#panelHost .nsec[data-sec="${sec}"]`); const sc=el&&el.closest('.body,.pbody'); if(sc) sc.scrollTop+=el.getBoundingClientRect().top-sc.getBoundingClientRect().top-8; el?.querySelector('a,button,input')?.focus({preventScroll:true}); } },isM()?320:20); }
 // mobile: keep the node visible in the strip between the top bar and the details sheet
 function revealAboveSheet(id){ const n=lay&&lay.by.get(id), st=$('#stage'), sh=$('#panelHost .sheet'); if(n&&st&&!sh){ const ap=$('#panelHost .stylep'); if(!ap) return; const {sc}=S.vp, right=ap.getBoundingClientRect().left-st.getBoundingClientRect().left-24, x1=S.vp.tx+(n.x+n.w/2+40)*sc; if(x1>right){ S.vp={...S.vp,tx:S.vp.tx-(x1-right)}; drawMap(); } return; } if(!n||!st||!sh) return; const r=st.getBoundingClientRect(), top=70, bot=sh.getBoundingClientRect().top-r.top-8; if(bot-top<40) return; const {sc}=S.vp; const cy=S.vp.ty+n.y*sc, cx=S.vp.tx+n.x*sc;
   if(cy>top+n.h*sc/2&&cy<bot-n.h*sc/2&&cx-n.w*sc/2>0&&cx+n.w*sc/2<st.clientWidth) return; S.vp={sc,tx:st.clientWidth/2-n.x*sc,ty:n.h*sc>bot-top-16?top+8-(n.y-n.h/2)*sc:(top+bot)/2-n.y*sc}; drawMap(); }
@@ -203,7 +205,7 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
     const id=nodeAt(e), [x,y]=stagePoint(e);
     if(e.target.closest('.handle')){ e.preventDefault(); addChild(); return; }
     if(e.target.closest('.cc')){ e.preventDefault(); toggleCollapse(id); return; }
-    if(id){ drag={id,x0:x,y0:y,moved:false}; if(e.pointerType!=='mouse') lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); if(MENU) MENU.lp=true; } },520); }
+    if(id){ drag={id,x0:x,y0:y,moved:false,link:!!e.target.closest('[data-link]')}; if(e.pointerType!=='mouse') lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); if(MENU) MENU.lp=true; } },520); }
     else pan={x0:x,y0:y,tx:S.vp.tx,ty:S.vp.ty,moved:false}; });
   st.addEventListener('pointermove',e=>{ if(!pts.has(e.pointerId)) return; pts.set(e.pointerId,stagePoint(e)); const [x,y]=stagePoint(e);
     if(pinch&&pts.size===2){ const [a,b]=[...pts.values()]; const d=Math.hypot(a[0]-b[0],a[1]-b[1]); const c=[(a[0]+b[0])/2,(a[1]+b[1])/2]; const f=d/pinch.d; const v=S.vp, ns=Math.max(.15,Math.min(3,v.sc*f)), k=ns/v.sc; S.vp={sc:ns,tx:c[0]-(pinch.c[0]-v.tx)*k,ty:c[1]-(pinch.c[1]-v.ty)*k}; pinch={d,c}; applyVp(); return; }
@@ -214,6 +216,7 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
   const end=e=>{ if(!pts.has(e.pointerId)) return; pts.delete(e.pointerId); clearTimeout(lp); if(pts.size<2&&pinch){ pinch=null; drawMap(); return; }
     if(pan){ if(!pan.moved&&!e.target.closest('g.node')){ /* click on empty canvas */ } if(pan.moved) drawMap(); pan=null; }
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
+      else if(d.link){ if(S.editing) commitEdit(); select(d.id,{scroll:false}); openDetails('link'); }
       else { if(S.editing) commitEdit(); if(S.sel===d.id&&e.detail>=2) startEdit(d.id); else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
@@ -294,7 +297,7 @@ function openMenu(html,trigger,pos){ closeMenu(); const L=$('#layer'); L.insertA
     else if(e.key==='Tab'){e.preventDefault();closeMenu(true);} }); }
 function closeMenu(restore){ if(!MENU) return false; const {el,trigger}=MENU; MENU=null; el.remove(); $('#layer .menuscrim')?.remove(); if(trigger){trigger.setAttribute('aria-expanded','false'); if(restore&&document.contains(trigger)) trigger.focus();} return true; }
 const mi=(act,icon,label,cls='',v='')=>`<button role="menuitem" tabindex="-1" data-act="${act}"${v!==''?` data-v="${esc(v)}"`:''}${cls?` class="${cls}"`:''}>${I(icon)}<span>${label}</span></button>`;
-function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','備註'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],['aiExpand','spark','AI 擴充'],['delete','trash','刪除','del']];
+function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],['aiExpand','spark','AI 擴充'],['delete','trash','刪除','del']];
   openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c])=>mi(a,i,l,c||'')).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
 function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">

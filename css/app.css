@@ -755,3 +755,15 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
  .chip.ghost{height:44px;padding:0 14px}
  .nsec h4 .linkbtn.mini{min-width:44px;display:inline-flex;align-items:center;justify-content:center}
 }
+/* v1.4 review r5: colour swatches carry a visible name under the colour */
+.cswatch{gap:2px;justify-content:space-between}
+.csw,.csw.auto{width:38px;height:50px;padding:4px 0 3px;flex-direction:column;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:10px;border:1.5px solid transparent;background:none}
+.csw i{width:24px;height:24px;border-radius:7px}
+.csw.auto i{width:22px;height:22px;border-radius:50%}
+.csw span{font-size:11.5px;line-height:1;font-weight:500;color:#3B2A20}
+[data-ui=dark] .csw span{color:var(--text)}
+.csw[aria-checked=true]{border-color:var(--accent);background:var(--accent-soft)}
+.csw[aria-checked=true] span{font-weight:700}
+@media (max-width:768px){.cswatch{gap:0}.csw,.csw.auto{width:44px;height:58px}.csw i,.csw.auto i{width:28px;height:28px}.csw span{font-size:12px}}
+/* review r5: phone details sheet ~62% so the map stays visible; outline list clears the bottom bar */
+@media (max-width:768px){.nsheet{max-height:62%!important}.outline{padding-bottom:0}.outline .doc{padding-bottom:calc(68px + env(safe-area-inset-bottom))}}

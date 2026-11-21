@@ -73,10 +73,10 @@ export function bounds(root){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;all(root).forEach
 export function colorOf(n,th){ if(n.d===0) return th.root; if(n.br&&typeof n.br==='object'){ const M=marks(th); return M[n.br.m%M.length][0]; } return th.br[n.br%th.br.length]; }
 // Colour marks: the theme's own branch colours when it has enough distinct ones, else a fixed set tuned for light/dark.
 // Each has a plain name so the picker never relies on colour alone.
-const MARKS_L=[['#D9433A','紅'],['#E07B1F','橘'],['#C99A06','黃'],['#2E9E5B','綠'],['#2F7BDB','藍'],['#8A55D6','紫']];
-const MARKS_D=[['#FF6B6B','紅'],['#FFA552','橘'],['#F2CC4B','黃'],['#4FD18B','綠'],['#6BA8FF','藍'],['#B794F6','紫']];
+const MARKS_L=[['#D9433A','紅'],['#CC701C','橙'],['#AA8205','黃'],['#2E9E5B','綠'],['#2F7BDB','藍'],['#8A55D6','紫']];
+const MARKS_D=[['#FF6B6B','紅'],['#FFA552','橙'],['#F2CC4B','黃'],['#4FD18B','綠'],['#6BA8FF','藍'],['#B794F6','紫']];
 export function hueName(hex){ const h=hex.replace('#',''); const [r,g,b]=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16)/255); const mx=Math.max(r,g,b),mn=Math.min(r,g,b),dl=mx-mn; if(dl<.12) return mx>.6?'淺灰':'灰'; let H=mx===r?((g-b)/dl)%6:mx===g?(b-r)/dl+2:(r-g)/dl+4; H=(H*60+360)%360;
-  return H<15||H>=340?'紅':H<40?'橘':H<70?'黃':H<165?'綠':H<200?'青':H<255?'藍':H<290?'紫':'粉'; }
+  return H<15||H>=340?'紅':H<40?'橙':H<70?'黃':H<165?'綠':H<200?'青':H<255?'藍':H<290?'紫':'粉'; }
 export function marks(th){ const u=[...new Set(th.br.map(c=>c.toUpperCase()))]; if(u.length>=5) return u.slice(0,6).map(c=>[c,hueName(c)]); return th.dark?MARKS_D:MARKS_L; }
 
 /* opt: {sel:id, lightLines:bool, sc:number (current zoom, for minimum visual line width), thumb, edge:'bracket'|'curve'|'straight', lw:'thin'|'standard'|'thick', lod, drop:id} */
@@ -144,7 +144,7 @@ export function renderMap(root,th,opt={}){
     cx+=TW;
     { const chips=tagChips(n); if(chips.length) cx+=2; chips.forEach(tg=>{ const w=tw(tg,TAGF)+16, tbg=tint(col0,.16,bgc), tfg=readable(col0,tbg,4.6);
       g+=`<rect x="${cx+6}" y="${ry-10}" width="${w}" height="20" rx="10" fill="${tbg}" data-g="tag" data-gbg="${bgc}" stroke="${readable(col0,bgc,3)}" stroke-width="1"/><text x="${cx+14}" y="${ry+4}" font-size="11.5" font-weight="600" fill="${tfg}" data-bg="${tbg}">${esc(tg)}</text>`; cx+=w+6; }); }
-    if(n.link){ const tch=typeof matchMedia==='function'&&matchMedia('(max-width:768px),(pointer:coarse)').matches; g+=(tch?`<g class="linkic" aria-hidden="true">`:`<a href="${esc(n.link)}" target="_blank" rel="noopener noreferrer" class="linkic" aria-label="開啟連結：${esc(n.link)}">`)+`<rect x="${cx+3}" y="${ry-11}" width="22" height="22" fill="transparent"/><g data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${ry-8}) scale(.68)" stroke="${readable(th.dark?'#8B9BFF':'#3F51E8',bgc,3)}" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="${P.link}"/></g>`+(tch?'</g>':'</a>'); cx+=22;}
+    if(n.link){ const tch=typeof matchMedia==='function'&&matchMedia('(max-width:768px),(pointer:coarse)').matches; const LH=Math.max(22,44/(opt.sc||1)); g+=(tch?`<g class="linkic linkhit" role="button" data-link="${n.id}" aria-label="連結：在詳情裡查看或開啟"><rect x="${cx+14-LH/2}" y="${ry-LH/2}" width="${LH}" height="${LH}" fill="transparent"/>`:`<a href="${esc(n.link)}" target="_blank" rel="noopener noreferrer" class="linkic" aria-label="開啟連結：${esc(n.link)}"><rect x="${cx+3}" y="${ry-11}" width="22" height="22" fill="transparent"/>`)+`<g data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${ry-8}) scale(.68)" stroke="${readable(th.dark?'#8B9BFF':'#3F51E8',bgc,3)}" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="${P.link}"/></g>`+(tch?'</g>':'</a>'); cx+=22;}
     if(n.note){g+=`<g class="noteic" data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${ry-8}) scale(.68)" stroke="${readable(th.dark?'#A3AAB6':'#646A73',bgc,3)}" fill="none" stroke-width="2" stroke-linecap="round"><path d="${P.note}"/></g>`;}
     if(n.collapsed&&n.c&&n.c.length){const ccx=n.x+(n.side===-1?-1:1)*(n.w/2+14), ccy=n.y, cfg=readable(col,nodeBg,4.5);
       g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點"><circle data-g="collapse" data-gbg="${CV}" cx="${ccx}" cy="${ccy}" r="10" fill="${nodeBg}" stroke="${G(col)}" stroke-width="1.6"/><text x="${ccx}" y="${ccy+4}" font-size="11.5" font-weight="700" fill="${cfg}" data-bg="${nodeBg}" text-anchor="middle">${countDesc(n)}</text></g>`;}
