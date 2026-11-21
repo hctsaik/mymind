@@ -4,6 +4,7 @@ import { thumbSvg, themeThumb, LAYOUTS, tagsOf, marks } from './mapview.js';
 import { VERSION } from './version.js';
 export const isMobile=()=>innerWidth<=768;
 const LOGO=`<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6" fill="#fff" stroke="none"/><path d="M8.6 12H11M11 6.5V17.5M11 6.5H19M11 12H19M11 17.5H19"/></svg>`;
+export const absTime=iso=>{ const d=new Date(iso); return `${d.getMonth()+1}/${d.getDate()} ${d.toTimeString().slice(0,5)}`; };
 export function rel(iso){ if(!iso) return ''; const d=new Date(iso), s=(Date.now()-d)/1000;
   if(s<60) return '剛剛'; if(s<3600) return Math.floor(s/60)+' 分鐘前'; if(s<86400&&new Date().getDate()===d.getDate()) return '今天 '+d.toTimeString().slice(0,5);
   if(s<172800) return '昨天 '+d.toTimeString().slice(0,5); return `${d.getMonth()+1}/${d.getDate()}`; }
@@ -38,6 +39,16 @@ export function savedChip(S){ const s=S.sync; let ic='cloud',l,sh;
   else if(S.unsynced){l=`已存本機 · ${S.unsynced} 項未同步`+(S.syncMode==='auto'&&S.autoAt?` · 約 ${Math.max(1,Math.round((S.autoAt-Date.now())/60000))} 分鐘內自動同步`:S.syncMode==='manual'?' · 按「同步」上傳':'');sh='未同步';}
   else {l='已同步到 '+(S.backendName||'GitHub')+(s.at?' · '+rel(s.at):'');sh='已同步';}
   return `<span class="saved ${s.state==='error'?'err':''}" role="status" aria-live="polite">${I(ic)}<span class="long">${esc(l)}</span><span class="short">${esc(sh)}</span></span>`;}
+// phones: the sync state rides on the ⋯ button as a badge (count, or ! when Google needs reconnecting) so the title keeps a readable width
+export function moreBtn(S){ const n=S.unsynced, warn=S.remote&&(S.driveAuth||S.sync.state==='error'); const st=!S.remote?'':S.driveAuth?'，需要重新連結 Google':S.sync.state==='error'?'，同步失敗':n?`，${n} 項未同步`:'';
+  const bd=!S.remote?'':warn?`<span class="nbadge warn" aria-hidden="true">!</span>`:n?`<span class="nbadge" aria-hidden="true">${n>99?'99+':n}</span>`:'';
+  return `<button class="icon-btn mobile-only rb more${warn?' warn':''}" data-act="moreMenu" aria-haspopup="menu" aria-expanded="false" aria-label="更多：同步、層級、縮放、匯出、歷史、設定${st}">${I('more')}${bd}</button>`; }
+// phones: problems that need the user (offline / reconnect Google / failed sync) also get a short text strip under the top bar
+export function mobileStatus(S){ if(!S.remote||S.find) return ''; const s=S.sync.state;
+  if(S.driveAuth) return `<button class="mstat warn mobile-only" data-act="syncNow">${I('alert')}<span>需要重新連結 Google · 點這裡</span></button>`;
+  if(s==='offline') return `<div class="mstat mobile-only" role="status">${I('cloud')}<span>離線：已存本機，連上網路後再同步</span></div>`;
+  if(s==='error') return `<button class="mstat warn mobile-only" data-act="syncNow">${I('alert')}<span>同步失敗 · 點這裡重試</span></button>`;
+  return ''; }
 export function topbar(S,doc,curNode){
   const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','詳情','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
   return `<header class="top flt">
@@ -52,8 +63,8 @@ export function topbar(S,doc,curNode){
      <button class="icon-btn mobile-only rb" data-act="style" aria-label="美化：主題與樣式">${I('wand')}</button>
      <button class="icon-btn mobile-only rb" data-act="find" aria-label="搜尋節點" aria-pressed="${!!S.find}">${I('search')}</button>
      <button class="icon-btn mobile-only rb" data-act="outline" aria-label="大綱" aria-pressed="${!!S.outline}">${I('outline')}</button>
-     <button class="icon-btn mobile-only rb" data-act="moreMenu" aria-haspopup="menu" aria-expanded="false" aria-label="更多：層級、縮放、匯出、歷史、設定">${I('more')}</button>
-   </div></header>`;
+     ${moreBtn(S)}
+   </div></header>${mobileStatus(S)}`;
 }
 export function editorShell(S,doc,curNode){ const th=THEMES[doc.theme]||THEMES[DEFAULT_THEME], m=isMobile(), sheet=m&&S.panel;
   return `${topbar(S,doc,curNode)}<div class="canvas ${S.panel&&!m?'has-panel':''} ${S.outline?'outline-on':''} ${sheet?'sheet-open':''}" id="cv" tabindex="0" role="application" aria-roledescription="心智圖畫布" aria-label="心智圖：${esc(doc.root.t)}。Tab 新增子主題，Enter 新增同級，Space 編輯，Esc 離開畫布" style="--cv:${th.canvas};--cvdot:${th.canvas}">
@@ -121,7 +132,7 @@ export function historyPanel(S){ const H=S.hist;
    <div class="pbody">${S.preview?`<div class="pvcard" role="status"><div>${I('history')}<span>正在預覽 <b>${esc(S.preview.label)}</b> 的版本（唯讀）</span></div><div class="acts"><button class="btn primary" data-act="restore">還原這個版本</button><button class="btn" data-act="endPreview">回到目前版本</button></div></div>`:''}
    <p class="panel-note" style="margin:0 0 12px">${S.backend==='drive'?'Google 雲端硬碟會保留每張圖較近的舊版本（約 30 天、最多 100 個）。還原會新增一個版本，不會改寫舊的。':`每次同步都是 <code>${esc(S.repo.split('/')[1]||'mymind-data')}</code> 的一個 commit（一次同步多張圖也只算一個）。還原會新增一個 commit，不會改寫歷史。`}</p>
    ${!S.remote?`<p class="panel-note">目前「只存瀏覽器」，沒有版本歷史。到 設定 › 儲存與同步 打開 GitHub 或 Google 雲端硬碟同步後，每次同步都會留下一個版本。</p>`:S.driveAuth?`<div class="alert warn" role="note">${I('info')}<div>重新連結 Google 才能讀取版本紀錄。<button class="btn" style="margin-top:8px" data-act="syncNow">重新連結</button></div></div>`:H.loading?`<p class="panel-note" role="status">讀取中…</p>`:H.error?`<div class="alert err" role="alert">${I('alert')}<div>${esc(H.error)}</div></div>`:!H.items.length?`<p class="panel-note">這張圖還沒有同步到 ${esc(S.backendName||'GitHub')}。</p>`:
-   `<ul class="hist">${H.items.map((i,k)=>`<li class="${S.preview&&S.preview.sha===i.sha?'on':''} ${k===0?'cur':''}" tabindex="0" role="button" data-act="preview" data-v="${i.sha}" aria-label="${esc(rel(i.date))} ${esc(i.msg)}"><b>${esc(rel(i.date))}${k===0?' · 目前版本':''}</b><div class="m">${esc(i.msg)}</div><div class="s">${S.backend==='drive'?'':`<code>${i.sha.slice(0,7)}</code>`}<span>${esc(i.author||'')}</span></div></li>`).join('')}</ul>
+   `<ul class="hist">${H.items.map((i,k)=>`<li class="${S.preview&&S.preview.sha===i.sha?'on':''} ${k===0?'cur':''}" tabindex="0" role="button" data-act="preview" data-v="${i.sha}" aria-label="${esc(rel(i.date))}（${esc(absTime(i.date))}） ${esc(i.msg)}"><b>${esc(rel(i.date))}${k===0?' · 目前版本':''}<span class="abs">${esc(absTime(i.date))}</span></b><div class="m">${esc(i.msg)}</div><div class="s">${S.backend==='drive'?'':`<code>${i.sha.slice(0,7)}</code>`}<span>${esc(i.author||'')}</span></div></li>`).join('')}</ul>
    ${S.backend==='drive'?'':`<a class="btn" style="width:100%;margin-top:10px" href="https://github.com/${esc(S.repo)}/commits/main/maps/${esc(S.mapId)}.json" target="_blank" rel="noopener">${I('ext')}在 GitHub 上看完整紀錄</a>`}`}</div></section>`;}
 export function outlineView(root,S={}){ const rows=[]; const m=isMobile(); let N=0;
   (function w(n,lv){ N++; const k=n.c||[], has=k.length>0, tg=tagsOf(n);
@@ -181,10 +192,11 @@ function lineSample(c){return `<svg class="lsample" viewBox="0 0 132 52" aria-hi
 export function settingsDialog(S,D){ const a11y=D.tab==='a11y', data=D.tab==='data', p=D.form;
   const mode=p.sync||'local', hasPat=!!(p.pat||'').trim(), bk=p.backend||'github', drv=bk==='drive', dv=D.drive, bn=drv?'Google 雲端硬碟':'GitHub';
   const bradio=(v,ic,t,sub)=>`<button class="radio bkradio" role="radio" data-act="formBackend" data-v="${v}" aria-checked="${bk===v}"><span class="dot"></span><div><b>${I(ic)}${t}</b><span>${sub}</span></div></button>`;
-  const driveCard=dv&&dv.email?`<div class="gdcard ok" role="group" aria-label="Google 雲端硬碟帳號"><div class="gdav" aria-hidden="true">${esc((dv.name||dv.email).trim().slice(0,1).toUpperCase())}</div><div class="gdinfo"><b>已連結 ${esc(dv.email)}</b><span>檔案在你的雲端硬碟「MyMind」資料夾，每張圖一個 .mymind 檔，另有 index.json 目錄。</span></div>
-      ${D.driveAuth?`<button class="btn primary" data-act="driveConnect">${I('cloud')}重新連結</button>`:''}<button class="btn" data-act="driveDisconnect">中斷連結</button></div>
+  const driveCard=dv&&dv.email?`<div class="gdcard ok" role="group" aria-label="Google 雲端硬碟帳號"><div class="gdav" aria-hidden="true">${esc((dv.name||dv.email).trim().slice(0,1).toUpperCase())}</div><div class="gdinfo"><b>已連結 ${esc(dv.email)}</b><span>檔案在你的雲端硬碟「MyMind」資料夾，每張圖一個 .mymind 檔，另有 index.json 目錄。登入權杖只留在記憶體，不會寫進這個裝置。</span></div>
+      ${D.driveAuth?`<button class="btn primary" data-act="driveConnect">${I('cloud')}重新連結</button>`:''}${D.confirmDisc?'':`<button class="btn" data-act="driveDisconnect">中斷連結</button>`}</div>
+      ${D.confirmDisc?`<div class="gdconfirm" role="alert"><p>中斷後要再授權才能同步。圖還在這個瀏覽器和雲端，檔案不會刪。</p><div class="acts"><button class="btn" data-act="driveDisconnectNo">取消</button><button class="btn danger" data-act="driveDisconnect" data-v="yes">確定中斷連結</button></div></div>`:''}
       ${D.driveAuth?`<p class="sub" style="margin-top:6px">這個分頁還沒有登入憑證（重新整理或超過約 1 小時就要再按一次）。修改都先存在這個瀏覽器，不會遺失。</p>`:''}`
-    :`<div class="gdcard"><div class="gdinfo"><b>用 Google 帳號連結</b><span>會開啟 Google 的登入視窗。MyMind 只能存取<b>它自己建立的檔案</b>（drive.file 權限），看不到你雲端硬碟裡的其他東西。</span></div><button class="btn primary gdbtn" data-act="driveConnect"${D.driveBusy?' aria-busy="true" disabled':''}>${I('cloud')}${D.driveBusy?'連結中…':'連結 Google 雲端硬碟'}</button></div>
+    :`<div class="gdcard"><div class="gdinfo"><b>用 Google 帳號連結</b><span>會開啟 Google 的登入視窗。MyMind 只能存取<b>它自己建立的檔案</b>（drive.file 權限），看不到你雲端硬碟裡的其他東西。登入權杖只留在記憶體，不會寫進這個裝置；重整或約一小時後要再按「重新連結」。</span></div><button class="btn primary gdbtn" data-act="driveConnect"${D.driveBusy?' aria-busy="true" disabled':''}>${I('cloud')}${D.driveBusy?'連結中…':'連結 Google 雲端硬碟'}</button></div>
       <details class="gdhelp"><summary>看到「Google 尚未驗證這個應用程式」？</summary><p>MyMind 還在 Google 的「測試」階段，所以會出現這個提醒。確認網址是 <code>accounts.google.com</code> 後，按「繼續」（或「進階」→「前往 hctsaik.github.io」），再勾選「查看、編輯、建立及刪除這個應用程式所使用的 Google 雲端硬碟檔案」。</p></details>`;
   const where=`<section class="setsec"><h4 id="bk-h">同步到哪裡</h4><p class="sub">一次只用一個雲端。切換後，這個瀏覽器裡的圖會在下次同步時上傳到新的地方；原本那邊的資料不會被刪除。</p>
     <div class="choices2 bkopts" role="radiogroup" aria-labelledby="bk-h">${bradio('drive','cloud','Google 雲端硬碟','用 Google 帳號登入；不用金鑰')}${bradio('github','git','GitHub','私人儲存庫；每次同步 1 個 commit')}</div>

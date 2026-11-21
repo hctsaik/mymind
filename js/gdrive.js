@@ -62,5 +62,5 @@ export function driveClient(){
     async writeIndex(list){ const text=JSON.stringify({format:'mymind-index/1',updated:new Date().toISOString(),maps:list},null,1)+'\n'; if(!byName.size) await listAll(); await upload(byName.get(INDEX),INDEX,text); },
     async commits(path){ let f=byName.get(nameOf(path)); if(!f){ await listAll(); f=byName.get(nameOf(path)); } if(!f) return [];
       const j=await req('GET',`${API}/files/${f.id}/revisions?fields=revisions(id,modifiedTime,lastModifyingUser(displayName))&pageSize=100`);
-      return (j.revisions||[]).slice().reverse().map(r=>({sha:`rev:${f.id}:${r.id}`,msg:'Google 雲端硬碟版本',date:r.modifiedTime,author:r.lastModifyingUser&&r.lastModifyingUser.displayName||''})); } };
+      return (j.revisions||[]).map((r,i)=>({sha:`rev:${f.id}:${r.id}`,msg:`第 ${i+1} 版 · Google 雲端硬碟`,date:r.modifiedTime,author:r.lastModifyingUser&&r.lastModifyingUser.displayName||''})).reverse(); } };
 }

@@ -786,9 +786,38 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .syncbtn.reauth{border-color:#B45309;color:var(--warn-text);background:var(--warn-bg)}
 [data-ui=dark] .syncbtn.reauth{color:#FCD34D;border-color:#B7791F}
 @media (max-width:768px){.gdcard .btn{height:44px;flex:1 1 auto}.gdhelp summary{min-height:44px}}
-/* phone editor top bar with the sync button too (6 round buttons): keep the title pill readable */
+/* ---------- v1.5: phone top bar keeps a readable title; sync state rides on the ⋯ button ---------- */
 @media (max-width:768px){
- .top.flt:has(.syncbtn:not([hidden])) .right-actions{gap:4px}
- .top.flt:has(.syncbtn:not([hidden])) .right-actions .rb,.top.flt .syncbtn:not([hidden]){width:44px;height:44px;min-width:44px;padding:0;justify-content:center}
- .top.flt:has(.syncbtn:not([hidden])) .backpill{max-width:calc(100vw - 16px - 6px - 6*44px - 5*4px);padding:0 10px 0 6px}
+ .top.flt .right-actions .syncbtn{display:none}
+ .top.flt .backpill{min-width:112px}
+ .rb.more{position:relative}
+ .rb.more .nbadge{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:11.5px;font-weight:700;display:inline-grid;place-items:center}
+ .rb.more .nbadge.warn{background:#B45309;color:#FFFFFF}
+ .rb.more.warn{box-shadow:0 0 0 2px #B45309,0 2px 8px rgba(31,35,41,.14)}
+}
+.ctx button.hasit{color:var(--accent);font-weight:600}
+.ctx button.warnit{color:var(--warn-text);background:var(--warn-bg);font-weight:600}
+/* ---------- review v14-r2: dialogs/sheets with a footer bar never hide the end of their content ---------- */
+.mbody{scroll-padding-bottom:24px}
+.hist b .abs{font-weight:400;color:var(--text-3);margin-left:8px;font-size:12px}
+.gdconfirm{margin-top:8px;padding:10px 12px;border:1.5px solid var(--warn-line);background:var(--warn-bg);border-radius:var(--r-md);font-size:13px;color:var(--text)}
+.gdconfirm p{margin:0 0 8px;line-height:1.6}
+.gdconfirm .acts{display:flex;gap:8px;justify-content:flex-end}
+.mstat{display:none}
+@media (max-width:768px){
+ .mbody{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+ .mfoot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+ .modal .mbody>:last-child{margin-bottom:8px}
+ /* conflict sheet: both versions side by side so all three choices (with their explanations) fit above the footer */
+ .versions{grid-template-columns:1fr 1fr;gap:8px}
+ .ver .thumb{height:78px}
+ .ver .vi{padding:8px 10px;font-size:12px}
+ .ver .vi b{font-size:13px}
+ .gdconfirm .acts .btn{flex:1;height:44px}
+ .mstat{display:flex;align-items:center;gap:8px;position:absolute;top:calc(64px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:5;max-width:calc(100% - 24px);min-height:36px;padding:6px 14px;border-radius:999px;background:var(--panel);color:var(--text);font-size:13px;font-weight:600;box-shadow:0 2px 10px rgba(31,35,41,.16);white-space:nowrap}
+ button.mstat{min-height:44px}
+ .mstat .i{width:16px;height:16px;flex:none}
+ .mstat.warn{background:var(--warn-bg);color:var(--warn-text);border:1.5px solid #B45309}
+ /* toasts move above the sheet's footer while a dialog is open, so they never cover choices */
+ body:has(#layer .dlg) .toast{bottom:auto;top:calc(12px + env(safe-area-inset-top))}
 }
