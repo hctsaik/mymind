@@ -104,12 +104,12 @@ export function historyPanel(S){ const H=S.hist;
    <a class="btn" style="width:100%;margin-top:10px" href="https://github.com/${esc(S.repo)}/commits/main/maps/${esc(S.mapId)}.json" target="_blank" rel="noopener">${I('ext')}在 GitHub 上看完整紀錄</a>`}</div></section>`;}
 export function outlineView(root){ const rows=[];(function w(n,lv){rows.push(`<button class="olrow" data-act="olSelect" data-v="${n.id}" style="padding-left:${lv*26}px;${lv===0?'font-weight:700;font-size:17px':lv===1?'font-weight:600':''}"><span class="b" aria-hidden="true"></span>${n.icon?esc(n.icon)+' ':''}${esc(n.t)}${n.note?' 📝':''}</button>`);(n.c||[]).forEach(c=>w(c,lv+1));})(root,0);
   return `<div class="outline"><div class="doc"><h2>大綱</h2><div class="ol">${rows.join('')}</div></div></div>`;}
-export function homeTop(S,title){return `<header class="top"><button class="icon-btn mobile-only" data-act="nav" aria-label="開啟選單：分類、設定、GitHub 狀態">${I('menu')}</button><div class="title"><h1>${esc(title)}</h1></div><div class="right-actions"><button class="btn desk-only" data-act="import">${I('upload')}匯入大綱</button><button class="btn primary" data-act="ai">${I('spark')}AI 產生</button></div></header>`;}
+export function homeTop(S,title){return `<header class="top"><button class="icon-btn mobile-only" data-act="nav" aria-label="開啟選單：分類、設定、GitHub 狀態">${I('menu')}</button><div class="title"><h1>${esc(title)}</h1></div><div class="right-actions"><button class="btn desk-only" data-act="mdImport">${I('paste')}匯入／貼上大綱</button><button class="btn primary" data-act="ai">${I('spark')}AI 產生</button></div></header>`;}
 const starter=()=>`<div class="starter">
     <button class="stc" data-act="new"><div class="ic" style="background:#EEF0FF;color:#3F51E8">${I('plus')}</div><div><b>空白心智圖</b><span>從中心主題開始</span></div></button>
     <button class="stc" data-act="ai"><div class="ic" style="background:#F3EEFE;color:#7C3AED">${I('spark')}</div><div><b>AI 產生</b><span>輸入主題或筆記</span></div></button>
     <button class="stc" data-act="aiNotes"><div class="ic" style="background:#E6F4EE;color:#0E7A56">${I('note')}</div><div><b>會議紀錄</b><span>AI 整理成圖</span></div></button>
-    <button class="stc" data-act="import"><div class="ic" style="background:#FDF4E3;color:#B45309">${I('upload')}</div><div><b>匯入大綱</b><span>Markdown／OPML</span></div></button></div>`;
+    <button class="stc" data-act="mdImport"><div class="ic" style="background:#FDF4E3;color:#B45309">${I('paste')}</div><div><b>匯入／貼上大綱</b><span>Markdown／OPML</span></div></button></div>`;
 const EMPTY_ART=`<svg width="220" height="120" viewBox="0 0 220 120" aria-hidden="true"><g fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M74 60H92V30Q92 22 100 22H118" stroke="#E06A48"/><path d="M74 60H118" stroke="#E06A48"/><path d="M74 60H92V90Q92 98 100 98H118" stroke="#E06A48"/></g><rect x="10" y="44" width="64" height="32" rx="16" fill="#FFBB91" stroke="#E06A48" stroke-width="1.5"/><rect x="118" y="11" width="60" height="22" rx="8" fill="#fff" stroke="#E06A48" stroke-width="1.5"/><rect x="118" y="49" width="60" height="22" rx="8" fill="#fff" stroke="#E06A48" stroke-width="1.5"/><rect x="118" y="87" width="60" height="22" rx="8" fill="#fff" stroke="#E06A48" stroke-width="1.5"/></svg>`;
 const DAY=864e5;
 function backupNote(S,n){ if(!n||S.remote) return ''; const p=S.prefs||{}; const last=p.lastBackup?Date.parse(p.lastBackup):0, snooze=p.backupSnooze?Date.parse(p.backupSnooze):0;
@@ -127,7 +127,7 @@ export function home(S,list,docs){ const f=S.filter; const titles={all:'所有�
     :f==='trash'?`<div class="empty"><h3>垃圾桶是空的</h3><p>移到垃圾桶的圖會保留在這裡，可以還原或永久刪除。</p></div>`
     :f==='starred'?`<div class="empty"><h3>還沒有加星號的圖</h3><p>在圖卡的「⋯」選單裡選「加星號」。</p></div>`
     :`<div class="empty">${EMPTY_ART}<h3>開始你的第一張心智圖</h3><p>從空白開始、讓 AI 整理一段筆記，或匯入 Markdown 大綱。<br>${S.remote?'先存在這個瀏覽器，同步時寫進你的私人儲存庫。':'圖會存在這個瀏覽器，不需要帳號；想多台裝置同步再連接 GitHub。'}</p>
-      <div class="acts"><button class="btn primary" style="height:44px" data-act="new">${I('plus')}空白心智圖</button><button class="btn ai-go" style="height:44px" data-act="ai">${I('spark')}用 AI 產生</button><button class="btn" style="height:44px" data-act="import">${I('upload')}匯入大綱</button></div></div>`;
+      <div class="acts"><button class="btn primary" style="height:44px" data-act="new">${I('plus')}空白心智圖</button><button class="btn ai-go" style="height:44px" data-act="ai">${I('spark')}用 AI 產生</button><button class="btn" style="height:44px" data-act="mdImport">${I('paste')}匯入／貼上大綱</button></div></div>`;
   return `${homeTop(S,titles[f])}<div class="home" id="content"><h2>${f==='all'?'歡迎 👋':titles[f]}</h2><div class="sub">${live.length} 張心智圖 · 存在這個瀏覽器${S.remote?' · '+MODE_NAME[S.syncMode]+'到 '+esc(S.repo):''}</div>
    ${backupNote(S,live.length)}
    ${f==='all'?starter():''}
@@ -141,7 +141,8 @@ export function welcome(){ return `<div class="welcome" id="content"><div class=
     <div class="choice rec"><h3>${I('laptop')}先存在這個瀏覽器<span class="tagrec">建議</span></h3><ul><li>不用帳號，馬上開始</li><li>所有功能都能用（AI 需要 OpenAI 金鑰）</li><li>可以隨時匯出全部備份、之後再連接 GitHub</li></ul><p class="wnote">${I('info')}<span>清除瀏覽器的網站資料時，圖會一起刪除，記得定期備份</span></p><button class="btn primary" data-act="welcomeLocal">先存在這個瀏覽器</button></div>
     <div class="choice"><h3>${I('git')}同步到 GitHub<span class="tagopt">選用</span></h3><ul><li>手機、電腦同步</li><li>每次同步都有版本歷史</li><li>可選手動同步或每幾分鐘自動同步</li></ul><p class="wnote2">約 2 分鐘：建立一把只能存取 mymind-data 的金鑰</p><button class="btn" data-act="welcomeGithub">連接 GitHub</button></div>
    </div>
-   <p class="wfoot">之後可以在 設定 › 儲存與同步 隨時更改。</p></div>`;}
+   <p class="wfoot">已經有大綱？<button class="linkbtn" data-act="welcomeMd">貼上 Markdown 建立第一張圖</button></p>
+   <p class="wfoot" style="margin-top:6px">之後可以在 設定 › 儲存與同步 隨時更改。</p></div>`;}
 function lineSample(c){return `<svg class="lsample" viewBox="0 0 132 52" aria-hidden="true"><rect x=".5" y=".5" width="131" height="51" rx="8" fill="#FFFFFF" stroke="var(--ctl)"/><rect x="8" y="17" width="34" height="18" rx="9" fill="#FFBB91" stroke="${c}" stroke-width="1.5"/><path d="M42 26H52M52 13.5V38.5M52 13.5H62M52 38.5H62" fill="none" stroke="${c}" stroke-width="1.5" stroke-linejoin="round"/><rect x="62" y="5" width="44" height="17" rx="5" fill="#FFFFFF" stroke="${c}" stroke-width="1.5"/><rect x="62" y="30" width="44" height="17" rx="5" fill="#FFFFFF" stroke="${c}" stroke-width="1.5"/><path d="M106 13.5H114M106 38.5H114" stroke="${c}" stroke-width="1.5"/><rect x="117" y="11" width="10" height="5" rx="2.5" fill="#3B2A20"/><rect x="117" y="36" width="10" height="5" rx="2.5" fill="#3B2A20"/></svg>`;}
 export function settingsDialog(S,D){ const a11y=D.tab==='a11y', data=D.tab==='data', p=D.form;
   const mode=p.sync||'local', hasPat=!!(p.pat||'').trim();
@@ -229,6 +230,25 @@ export function conflictDialog(C){ const d1=C.mineDiff,d2=C.theirsDiff;
    </div>
    <div class="mfoot"><span class="info">${I('info')}不論選哪個，都不會遺失資料</span><button class="btn" data-act="closeDialog">稍後</button><button class="btn primary" data-act="cfApply">套用</button></div>
   </div></div>`;}
-export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','備註'],['Ctrl+1…5','優先順序'],['/','搜尋標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
+export function shortcutsDialog(){ const rows=[['Tab','新增子主題'],['Enter','新增同級'],['Shift+Tab','升一層'],['Space / F2','編輯文字'],['Delete','刪除節點'],['Ctrl+C','複製節點（Markdown）'],['Ctrl+X','剪下節點'],['Ctrl+V','貼上 Markdown／節點'],['Ctrl+Shift+V','開啟「從 Markdown 匯入」'],['↑ ↓ ← →','移動選取'],['Alt+↑ / Alt+↓','上下移動節點'],['Ctrl+.','收合／展開'],['Ctrl+Z / Ctrl+Y','復原／重做'],['Ctrl+S','立刻同步'],['Ctrl+O','大綱'],['Ctrl+Alt+M','備註'],['Ctrl+1…5','優先順序'],['/','搜尋標題'],['F6','隨機換主題'],['Alt+0','跳回畫布'],['Esc','離開畫布／關閉']];
   return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="kb-h" style="width:min(520px,100%)"><div class="mhead"><div class="spark" aria-hidden="true">${I('kb')}</div><div><h3 id="kb-h">鍵盤快捷鍵</h3><p>焦點在畫布上時使用</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody"><table class="kbt">${rows.map(([k,v])=>`<tr><td><span class="kbd">${k}</span></td><td>${v}</td></tr>`).join('')}</table></div></div></div>`;}
 export function promptDialog(P){ return `<div class="scrim" data-act="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pr-h" style="width:min(440px,100%)"><div class="mhead"><div><h3 id="pr-h">${esc(P.title)}</h3>${P.sub?`<p>${esc(P.sub)}</p>`:''}</div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div><div class="mbody">${P.input!==undefined?`<div class="field"><label for="pr-in">${esc(P.label||'')}</label><div class="inp"><input id="pr-in" value="${esc(P.input)}" autocomplete="off"></div></div>`:''}</div><div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn ${P.danger?'danger':'primary'}" data-act="promptOk">${esc(P.ok||'確定')}</button></div></div></div>`;}
+
+// ---------- Markdown import dialog (v1.2) ----------
+function mdTreeHtml(n,depth,budget,rt){ if(budget.left<=0) return ''; budget.left--; const kids=(n.c||[]);
+  const cls=[rt?'rt':'',n.tgt?'tgt':'',n.done?'done':''].filter(Boolean).join(' ');
+  return `<li${cls?` class="${cls}"`:''}><span>${esc(n.t)}${n.note?`<i class="mdnote" title="${esc(n.note)}">${I('note')}<span class="sr">有備註</span></i>`:''}</span>${kids.length&&budget.left>0?`<ul>${kids.map(k=>mdTreeHtml(k,depth+1,budget,false)).join('')}</ul>`:''}</li>`; }
+export function mdPreview(tree,count){ if(!tree||!count) return `<div class="mdempty"><b>貼上或輸入 Markdown</b><span>預覽會即時顯示在這裡</span></div>`;
+  const budget={left:300}; const html=`<ul class="mdtree">${mdTreeHtml(tree,0,budget,true)}</ul>`; return html+(budget.left<=0?`<p class="mdmore">預覽只顯示前 300 個節點</p>`:''); }
+export function mdOkLabel(D,count){ return D.target==='node'?`加入 ${count} 個節點`:`建立心智圖（${count} 個節點）`; }
+export function mdDialog(D,tree,count){ const radio=(v,t,sub)=>`<button class="radio" role="radio" data-act="mdTarget" data-v="${v}" aria-checked="${D.target===v}"><span class="dot"></span><div><b>${t}</b><span>${sub}</span></div></button>`;
+  return `<div class="scrim" data-act="scrim"><div class="modal mdmodal" role="dialog" aria-modal="true" aria-labelledby="md-h">
+   <div class="mhead"><div class="spark" aria-hidden="true">${I('paste')}</div><div><h3 id="md-h">從 Markdown 匯入／貼上</h3><p>標題 #、清單 - * + 1.、縮排都會變成節點</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
+   <div class="mbody">
+    ${D.nodeId?`<p class="sr" id="mdt-h">加到哪裡</p><div class="choices2 mdtarget" role="radiogroup" aria-labelledby="mdt-h">${radio('node',`加到「${esc(D.nodeT)}」底下`,'成為選取節點的子主題')}${radio('new','建立新的心智圖','第一個標題當中心主題')}</div>`:''}
+    <div class="mdgrid">
+     <div class="mdcol"><label for="md-in" class="mdlab">Markdown</label><textarea class="ta mdta" id="md-in" data-input="mdText" spellcheck="false" placeholder="# 名古屋旅行&#10;## 行程&#10;- Day 1&#10;  - 熱田神宮&#10;## 美食&#10;- 味噌豬排">${esc(D.md||'')}</textarea>
+      <div class="mdtools"><button class="btn" data-act="mdPick">${I('upload')}選擇檔案…</button><button class="btn" data-act="mdClip">${I('paste')}從剪貼簿貼上</button></div></div>
+     <div class="mdcol"><div class="mdlab" id="md-count" aria-live="polite">預覽 · 共 ${count} 個節點</div><div class="preview mdprev" id="md-prev">${mdPreview(tree,count)}</div></div>
+    </div></div>
+   <div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn primary" id="md-ok" data-act="mdOk"${count?'':' disabled'}>${mdOkLabel(D,count)}</button></div></div></div>`; }

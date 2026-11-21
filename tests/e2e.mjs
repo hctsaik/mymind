@@ -98,12 +98,106 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   // import markdown
   await p.goto(BASE+'#/'); await W(200);
   const fs=await import('node:fs'); fs.writeFileSync('/tmp/mm-import.md','# 匯入測試\n- 甲\n  - 甲一\n- 乙\n');
-  const [fc]=await Promise.all([p.waitForEvent('filechooser'),p.click('[data-act="import"]')]); await fc.setFiles('/tmp/mm-import.md'); await W(500);
+  await p.click('[data-act="mdImport"]'); await W(150);
+  const [fc]=await Promise.all([p.waitForEvent('filechooser'),p.click('[data-act="mdPick"]')]); await fc.setFiles('/tmp/mm-import.md'); await W(300);
+  ok('md dialog: 選擇檔案 loads .md into the box', (await p.inputValue('#md-in')).startsWith('# 匯入測試'));
+  await p.click('#md-ok'); await W(500);
   ok('import Markdown creates map', await p.evaluate(()=>window.__mm.doc&&window.__mm.doc.root.t==='匯入測試'&&window.__mm.doc.root.c.length===2));
   fs.writeFileSync('/tmp/mm-import.opml','<?xml version="1.0"?><opml version="2.0"><head><title>OPML 測試</title></head><body><outline text="OPML 測試"><outline text="A"><outline text="A1"/></outline><outline text="B"/></outline></body></opml>');
   await p.goto(BASE+'#/'); await W(200);
-  const [fc2]=await Promise.all([p.waitForEvent('filechooser'),p.click('[data-act="import"]')]); await fc2.setFiles('/tmp/mm-import.opml'); await W(500);
+  await p.click('[data-act="mdImport"]'); await W(150);
+  const [fc2]=await Promise.all([p.waitForEvent('filechooser'),p.click('[data-act="mdPick"]')]); await fc2.setFiles('/tmp/mm-import.opml'); await W(500);
   ok('import OPML creates map', await p.evaluate(()=>window.__mm.doc&&window.__mm.doc.root.t==='OPML 測試'));
+  // ================= v1.2: Markdown paste / copy =================
+  { const tr=()=>p.evaluate(()=>JSON.parse(JSON.stringify(window.__mm.doc.root)));
+    const strip=n=>({t:n.t,...(n.c&&n.c.length?{c:n.c.map(strip)}:{})});
+    const pick=async t=>{ await p.locator('#mapsvg g.node',{hasText:t}).first().click(); await W(80); };
+    const synth=(type,data,sel)=>p.evaluate(([type,d,sel])=>{ const dt=new DataTransfer(); for(const [k,v] of Object.entries(d||{})) dt.setData(k,v); const ev=new ClipboardEvent(type,{clipboardData:dt,bubbles:true,cancelable:true}); (sel?document.querySelector(sel):document.activeElement||document.body).dispatchEvent(ev); return {prevented:ev.defaultPrevented,text:dt.getData('text/plain'),html:dt.getData('text/html')}; },[type,data,sel]);
+    const toastTxt=()=>p.evaluate(()=>{const t=document.querySelector('#toast.on'); return t?t.textContent:'';});
+    await p.goto(BASE+'#/'); await W(200);
+    await p.click('[data-act="mdImport"]'); await W(150);
+    ok('md dialog opens from home 匯入／貼上大綱', await p.locator('.mdmodal #md-in').count()===1&&await p.locator('#md-prev .mdempty').count()===1);
+    const MD='# 名古屋旅行\n## 行程\n- Day 1\n  - 熱田神宮\n  - [x] 名古屋城\n## 美食\n1. 味噌豬排\n2. **鰻魚飯** [官網](https://example.com)\n   > 要排隊';
+    await p.fill('#md-in',MD); await W(150);
+    ok('md dialog: live preview tree + node count', /共 8 個節點/.test(await p.textContent('#md-count'))&&await p.locator('#md-prev .mdtree li').count()===8, await p.textContent('#md-count'));
+    ok('md dialog: primary button 建立心智圖（8 個節點）', (await p.textContent('#md-ok')).includes('建立心智圖（8 個節點）'));
+    await p.screenshot({path:SHOTS+'/23-md-import-dialog-desktop.png'});
+    await p.click('#md-ok'); await W(500);
+    let t=await tr();
+    ok('dialog creates map: H1 → root, H2 → branches', t.t==='名古屋旅行'&&t.c.map(x=>x.t).join()==='行程,美食'&&t.c[0].c[0].c.length===2, JSON.stringify(strip(t)).slice(0,200));
+    ok('tasks → done, inline md stripped, link + quote kept in note', t.c[0].c[0].c[1].done===true&&t.c[1].c[1].t==='鰻魚飯 官網'&&/example\.com/.test(t.c[1].c[1].note||'')&&/要排隊/.test(t.c[1].c[1].note||''), JSON.stringify(t.c[1].c[1]));
+    // synthetic paste on the canvas, under the selected node
+    await pick('美食'); const u0=await p.evaluate(()=>window.__mm.undo.length);
+    let r=await synth('paste',{'text/plain':'- 手羽先\n- 台灣拉麵\n  - 辣\n- 小倉吐司'});
+    t=await tr(); const food=t.c[1];
+    ok('paste Markdown list → siblings under selected node', r.prevented&&food.c.map(x=>x.t).join()==='味噌豬排,鰻魚飯 官網,手羽先,台灣拉麵,小倉吐司'&&food.c[3].c[0].t==='辣', food.c.map(x=>x.t).join());
+    ok('paste is one undo step', await p.evaluate(()=>window.__mm.undo.length)===u0+1);
+    ok('paste toast 已貼上 4 個節點', (await toastTxt()).includes('已貼上 4 個節點'));
+    ok('pasted first node is selected', await p.evaluate(()=>{const s=window.__mm; return JSON.stringify(s.doc.root).includes(s.sel)&&s.sel===s.doc.root.c[1].c[2].id;}));
+    await p.keyboard.press('Control+z'); await W(80); t=await tr();
+    ok('one Ctrl+Z removes the whole paste', t.c[1].c.length===2);
+    await pick('行程'); await synth('paste',{'text/plain':'# 第二天\n- 大須商店街\n- 名古屋港'}); t=await tr();
+    ok('paste single H1 → one child subtree', t.c[0].c.length===2&&t.c[0].c[1].t==='第二天'&&t.c[0].c[1].c.length===2);
+    await pick('行程'); await synth('paste',{'text/plain':'甲\n  甲一\n乙'}); t=await tr();
+    ok('paste plain indented lines', t.c[0].c.slice(2).map(strip).map(x=>JSON.stringify(x)).join()==='{"t":"甲","c":[{"t":"甲一"}]},{"t":"乙"}');
+    // copy as markdown (copy event)
+    await pick('行程'); await p.keyboard.press('Control+1'); await W(50);
+    r=await synth('copy',{},'#cv');
+    ok('Ctrl+C / copy event puts subtree Markdown on clipboard', r.prevented&&r.text.startsWith('- 行程\n  - Day 1\n    - 熱田神宮\n    - [x] 名古屋城\n'), JSON.stringify(r.text.slice(0,80)));
+    ok('copy also puts MyMind HTML (structure kept)', /data-mymind=/.test(r.html)&&/<ul><li>行程/.test(r.html));
+    ok('copy toast shows', /已複製「行程」為 Markdown（\d+ 個節點）/.test(await toastTxt()), await toastTxt());
+    await p.screenshot({path:SHOTS+'/24-copy-markdown-toast-desktop.png'});
+    await pick('美食'); await synth('paste',{'text/plain':r.text,'text/html':r.html}); t=await tr();
+    const cp=t.c[1].c[2]; const ids=JSON.stringify(t).match(/"id":"[^"]+"/g);
+    ok('MyMind → MyMind paste keeps structure + priority, fresh ids', cp&&cp.t==='行程'&&cp.pri===1&&JSON.stringify(strip(cp))===JSON.stringify(strip(t.c[0]))&&new Set(ids).size===ids.length, cp&&JSON.stringify({t:cp.t,pri:cp.pri}));
+    await p.keyboard.press('Control+z'); await W(80);
+    // root copy → "# " heading; md → map → md round trip through the app
+    await p.evaluate(()=>{ window.__mm.sel=window.__mm.doc.root.id; }); await pick('名古屋旅行');
+    r=await synth('copy',{},'#cv'); const md1=r.text;
+    ok('root copies as "# title" + nested "- " lists', md1.startsWith('# 名古屋旅行\n\n- 行程\n  - Day 1'), md1.slice(0,60));
+    await p.goto(BASE+'#/'); await W(200); await p.click('[data-act="mdImport"]'); await W(100); await p.fill('#md-in',md1); await p.click('#md-ok'); await W(400);
+    await pick('名古屋旅行'); r=await synth('copy',{},'#cv');
+    ok('round trip md → map → md is stable (in app)', r.text===md1, r.text.length+' vs '+md1.length);
+    // real keyboard Ctrl+C / Ctrl+X / Ctrl+V through the hidden textarea
+    await ctx.grantPermissions(['clipboard-read','clipboard-write'],{origin:new URL(BASE).origin});
+    await pick('美食'); await p.keyboard.press('Control+c'); await W(150);
+    const clip=await p.evaluate(()=>navigator.clipboard.readText()).catch(e=>'ERR '+e.message);
+    ok('real Ctrl+C copies Markdown to the system clipboard', clip.startsWith('- 美食\n  - 1. 味噌豬排')||clip.startsWith('- 美食\n  - 味噌豬排'), JSON.stringify(clip.slice(0,40)));
+    ok('focus returns to canvas after Ctrl+C', await p.evaluate(()=>document.activeElement&&document.activeElement.id==='cv'));
+    await pick('Day 1'); const n1=await nodes(p); await p.keyboard.press('Control+x'); await W(150);
+    ok('Ctrl+X cuts the node', await nodes(p)<n1&&!(await tr()).c[0].c.some(x=>x.t==='Day 1'));
+    await pick('行程'); await p.keyboard.press('Control+v'); await W(200); t=await tr();
+    ok('real Ctrl+V pastes it back (structure kept)', t.c[0].c.some(x=>x.t==='Day 1'&&x.c&&x.c.length===2), t.c[0].c.map(x=>x.t).join());
+    // inline editing: plain paste + 轉成節點？ toast
+    await pick('小倉吐司').catch(()=>{}); await pick('美食'); await p.keyboard.press('F2'); await W(100);
+    r=await synth('paste',{'text/plain':'早餐\n午餐\n晚餐'},'#ovl .editbox');
+    ok('paste while editing stays plain text (not intercepted)', !r.prevented&&await p.locator('textarea.editbox').count()===1);
+    ok('multi-line paste while editing offers 轉成節點', /轉成節點/.test(await toastTxt()));
+    await p.click('#toast [data-act="pasteEditNodes"]'); await W(200); t=await tr();
+    ok('轉成節點 inserts children and keeps the node text', t.c[1].t==='美食'&&t.c[1].c.slice(-3).map(x=>x.t).join()==='早餐,午餐,晚餐');
+    // Ctrl+Shift+V opens dialog targeting the selected node
+    await pick('行程'); await p.keyboard.press('Control+Shift+V'); await W(150);
+    ok('Ctrl+Shift+V opens dialog with 加到「行程」底下', await p.locator('[data-act="mdTarget"][data-v="node"][aria-checked="true"]').filter({hasText:'行程'}).count()===1);
+    await p.fill('#md-in','- 回程\n- 伴手禮'); await W(100);
+    ok('dialog button says 加入 2 個節點', (await p.textContent('#md-ok')).trim()==='加入 2 個節點');
+    await p.screenshot({path:SHOTS+'/25-md-paste-into-node-desktop.png'});
+    await p.click('#md-ok'); await W(200); t=await tr();
+    ok('dialog inserts under selected node', t.c[0].c.slice(-2).map(x=>x.t).join()==='回程,伴手禮');
+    // node context menu + export menu
+    await p.locator('#mapsvg g.node',{hasText:'美食'}).first().click({button:'right'}); await W(150);
+    ok('context menu has 複製為 Markdown + 貼上 Markdown', await p.locator('.lpmenu [data-act="copyMd"]').count()===1&&await p.locator('.lpmenu [data-act="pasteMd"]').count()===1);
+    await p.click('.lpmenu [data-act="copyMd"]'); await W(150);
+    const clip2=await p.evaluate(()=>navigator.clipboard.readText()).catch(()=>'');
+    ok('menu 複製為 Markdown copies + toast', clip2.startsWith('- 美食')&&/已複製「美食」/.test(await toastTxt()), JSON.stringify(clip2.slice(0,20)));
+    await p.click('[data-act="exportMenu"]'); await W(150);
+    const [dmd]=await Promise.all([p.waitForEvent('download',{timeout:5000}).catch(()=>null),p.click('[data-act="exp"][data-v="md"]')]); await W(150);
+    const clip3=await p.evaluate(()=>navigator.clipboard.readText()).catch(()=>'');
+    ok('匯出整張圖 Markdown: downloads .md AND copies', !!dmd&&clip3.startsWith('# 名古屋旅行')&&/已複製整張圖/.test(await toastTxt()));
+    // paste on the map list opens the dialog prefilled
+    await p.goto(BASE+'#/'); await W(200); await synth('paste',{'text/plain':'# 清單貼上\n- a'},'body'); await W(150);
+    ok('paste on map list opens dialog prefilled', (await p.inputValue('#md-in').catch(()=>'')).startsWith('# 清單貼上'));
+    await p.keyboard.press('Escape'); await W(100);
+  }
   // map list, search
   await p.goto(BASE+'#/'); await W(200);
   ok('map list shows 3 maps', await p.locator('.grid > .card').count()>=3, String(await p.locator('.grid > .card').count()));
@@ -298,7 +392,23 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   await p.screenshot({path:SHOTS+'/13-editor-mobile.png'});
   await p.click('[data-act="moreMenu"]'); await W(200);
   const moreTxt=await p.locator('#layer').textContent(); ok('more menu has 外觀與無障礙', moreTxt.includes('外觀與無障礙'));
+  ok('mobile more menu has 從 Markdown 匯入／貼上 + 複製為 Markdown', moreTxt.includes('從 Markdown 匯入／貼上')&&moreTxt.includes('複製選取節點為 Markdown'));
   await p.keyboard.press('Escape'); await W(100);
+  // long-press menu → 複製為 Markdown
+  { const cdp=await ctx.newCDPSession(p); const bb=await p.locator('#mapsvg g.node').nth(1).boundingBox(); const pt={x:bb.x+bb.width/2,y:bb.y+bb.height/2};
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[pt]}); await W(750); await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await W(200);
+    ok('mobile long-press menu offers 複製為 Markdown', await p.locator('.lpmenu [data-act="copyMd"]').count()===1);
+    const cb=await p.locator('.lpmenu [data-act="copyMd"]').boundingBox(); ok('long-press menu items ≥44px', cb&&cb.height>=44&&cb.width>=44, JSON.stringify(cb));
+    await p.screenshot({path:SHOTS+'/26-longpress-copy-markdown-mobile.png'});
+    await W(400); await p.click('.lpmenu [data-act="copyMd"]'); await W(200);
+    ok('mobile copy shows toast', /已複製「.+」為 Markdown/.test(await p.evaluate(()=>document.querySelector('#toast.on')?.textContent||'')));
+    await p.screenshot({path:SHOTS+'/27-copy-toast-mobile.png'});
+    await p.click('[data-act="moreMenu"]'); await W(200); await p.click('[data-act="mdImport"]'); await W(200);
+    await p.fill('#md-in','- 手機貼上\n  - 子項\n- 第二項'); await W(150);
+    await p.screenshot({path:SHOTS+'/28-md-import-dialog-mobile.png'});
+    const ob=await p.locator('#md-ok').boundingBox(); ok('mobile md dialog: button ≥44px, fits screen', ob&&ob.height>=44&&ob.x+ob.width<=390, JSON.stringify(ob));
+    const before=await nodes(p); await p.click('#md-ok'); await W(300);
+    ok('mobile md dialog inserts nodes', await nodes(p)===before+3, (await nodes(p))+' vs '+before); }
   ok('AI bar with × inside', await p.locator('#aiq').count()===1&&await p.locator('[data-act="aibarClose"]').count()===1);
   await p.click('[data-act="aibarClose"]'); await W(100); ok('AI bar closes', await p.locator('#aiq').count()===0);
   await p.click('[data-act="style"].mobile-only'); await W(250); await p.screenshot({path:SHOTS+'/14-style-mobile.png'});

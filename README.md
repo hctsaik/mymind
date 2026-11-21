@@ -89,11 +89,23 @@
 - AI：輸入主題或貼上筆記產生新圖；選一個節點用 AI 展開（Ctrl+J）。
 - 匯入 Markdown / OPML / .mymind.json / .mymind 備份；匯出 PNG（2x）、SVG、Markdown、OPML、JSON。
 
+### Markdown 複製／貼上
+
+- **貼上變節點**：選一個節點後按 Ctrl+V（Mac 為 ⌘V），剪貼簿裡的 Markdown 會變成它底下的子主題；整次貼上可以用一次 Ctrl+Z 復原。
+- **複製為 Markdown**：選一個節點按 Ctrl+C，整個分支會以 Markdown 放進剪貼簿（中心主題是 `# 標題`，子主題是縮排的 `- ` 清單），可直接貼到筆記軟體；貼回 MyMind 時會保留圖示、優先順序等完整結構。Ctrl+X 剪下。
+- **從 Markdown 匯入／貼上**（Ctrl+Shift+V、匯出選單、手機的「⋯」選單、首頁「匯入／貼上大綱」）：貼上或選檔後即時預覽，可選擇加到選取節點底下或建立新的心智圖。
+- 手機：長按節點 →「複製 Markdown」「貼上 Markdown」。
+- 編輯文字時貼上仍是純文字；貼上多行文字時會提示「轉成節點」。
+- 匯出 › 整張圖 Markdown：同時複製到剪貼簿並下載 .md。
+- 支援的語法：標題 `#`～`######`；清單 `-` `*` `+` `1.` `1)`，用 2／4 個空白或 Tab 縮排；一般縮排文字；標題和清單混用；待辦 `- [ ]`／`- [x]`（打勾＝完成）；`> 引言` 成為上一個節點的備註。粗體、斜體、程式碼、刪除線等行內格式會移除，連結保留文字，網址存在備註（「連結：…」）。空行、分隔線會略過，程式碼區塊的每一行當一般文字。
+- 只有一個最上層項目（例如一個 `#` 標題）時，它就是整個分支／新圖的中心主題；有多個時會成為並列的子主題（建立新圖時第一個當中心主題）。
+
 ## 本機開發
 
 ```bash
 python3 -m http.server 8765     # 然後打開 http://localhost:8765/
 npm i                           # 只有測試需要（playwright-core）
+node tests/markdown.mjs         # Markdown 解析／匯出單元測試（不需瀏覽器）
 node tests/e2e.mjs              # 端對端測試（GitHub 和 OpenAI 都是模擬的）：只存瀏覽器、手動同步、自動批次同步、備份還原、舊資料搬移
 GH_TOKEN=… node tests/roundtrip.mjs   # 對真的 mymind-data 做讀寫往返（金鑰只從環境變數讀，結束會刪掉測試圖）
 node tests/audit.mjs            # 對比度 / 點擊範圍 / 重疊檢查

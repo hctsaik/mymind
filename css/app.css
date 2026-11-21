@@ -572,3 +572,28 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
 .side-syncrow .side-sync{width:100%;height:40px;justify-content:center}
 .sync .repo{max-width:150px}
 @media (max-width:768px){.side-syncrow .side-sync{height:44px}}
+
+/* v1.2 Markdown import */
+.mdmodal{width:min(880px,100%)}
+.mdgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.mdcol{min-width:0;display:flex;flex-direction:column}
+.mdlab{font-size:12.5px;font-weight:600;color:var(--text-2);margin-bottom:6px;display:block}
+.mdta{height:300px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6}
+.mdtools{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.mdtools .btn{min-height:44px}
+.mdprev{margin-top:0;height:300px;overflow:auto;background:var(--panel-2)}
+.mdtree,.mdtree ul{list-style:none;margin:0;padding:0}
+.mdtree ul{padding-left:14px;margin-left:7px;border-left:1.5px solid var(--ctl,#8A8F98)}
+.mdtree li{font-size:13px;line-height:1.75;color:var(--text)}
+.mdtree li>span{display:inline-flex;align-items:center;gap:4px}
+.mdtree .rt>span{font-weight:700;font-size:14px}
+.mdtree .tgt>span{color:var(--text-2);font-weight:600}
+.mdtree .done>span{text-decoration:line-through;color:var(--text-2)}
+.mdnote svg{width:14px;height:14px;color:var(--text-2)}
+.mdempty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;color:var(--text-2);font-size:13px}
+.mdempty b{color:var(--text);font-size:14px}
+.mdmore{font-size:12px;color:var(--text-2);margin-top:8px}
+.mdtarget{grid-template-columns:1fr 1fr;margin:0 0 14px}
+.linkbtn{color:var(--accent-text,var(--accent));text-decoration:underline;font:inherit;min-height:44px;padding:0 4px}
+.pastebin{position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+@media (max-width:768px){.mdgrid{grid-template-columns:1fr;gap:12px}.mdta{height:170px}.mdprev{height:220px}.mdtarget{grid-template-columns:1fr}}

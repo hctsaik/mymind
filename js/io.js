@@ -1,27 +1,66 @@
 // Import / export: Markdown outline, OPML, .mymind.json, PNG/SVG.
 import { newId } from './store.js';
 const withIds=n=>({id:newId(),t:n.t,...(n.note?{note:n.note}:{}),...(n.c&&n.c.length?{c:n.c.map(withIds)}:{})});
-export function fromMarkdown(md){
-  const lines=md.replace(/\r/g,'').split('\n').filter(l=>l.trim()); if(!lines.length) throw new Error('沒有內容');
-  const items=[]; for(const l of lines){ let m;
-    if(m=l.match(/^(#{1,6})\s+(.*)$/)) items.push({lv:m[1].length-1,t:m[2].trim(),h:true});
-    else if(m=l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/)) items.push({lv:null,ind:m[1].replace(/\t/g,'  ').length,t:m[3].trim()});
-    else items.push({lv:null,ind:l.match(/^\s*/)[0].replace(/\t/g,'  ').length,t:l.trim()}); }
-  const hMax=Math.max(-1,...items.filter(i=>i.h).map(i=>i.lv));
-  const inds=[...new Set(items.filter(i=>!i.h).map(i=>i.ind))].sort((a,b)=>a-b);
-  items.forEach(i=>{ if(!i.h) i.lv=hMax+1+inds.indexOf(i.ind); });
-  let root; const stack=[];
-  if(items[0].lv===0&&items.filter(i=>i.lv===0).length===1){root={t:items[0].t,c:[]};items.shift();} else root={t:'匯入的大綱',c:[]};
-  stack.push({lv:-1,n:root}); const base=root.t==='匯入的大綱'?0:1;
-  for(const it of items){ const lv=it.lv-base; const n={t:it.t.replace(/\*\*|__|`/g,''),c:[]};
-    while(stack.length>1&&stack[stack.length-1].lv>=lv) stack.pop(); stack[stack.length-1].n.c.push(n); stack.push({lv,n}); }
-  return withIds(root);
-}
+// ---------- Markdown ----------
+// Inline markdown → plain node text. Links keep their text; URLs are returned so the caller can keep them (in the note).
+export function stripInline(t){ const links=[];
+  t=String(t).replace(/\\([\\`*_{}\[\]()#+\-.!>|~<])/g,(m,c)=>'\u0000'+c.charCodeAt(0)+'\u0001').replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,(m,a,u)=>{links.push(u);return a;})
+     .replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,(m,a,u)=>{links.push(u);return a;})
+     .replace(/<(https?:\/\/[^>\s]+)>/g,(m,u)=>u)
+     .replace(/`([^`]+)`/g,'$1').replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g,'$2').replace(/~~(?=\S)(.+?)(?<=\S)~~/g,'$1')
+     .replace(/(^|[^\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?!\w)/g,'$1$2').replace(/(^|[^\w])_(?=\S)([^_]+?)(?<=\S)_(?!\w)/g,'$1$2')
+     .replace(/<\/?[a-zA-Z][^>]*>/g,'').replace(/\u0000(\d+)\u0001/g,(m,c)=>String.fromCharCode(+c)).replace(/\s+/g,' ').trim();
+  return {t,links}; }
+// Markdown → list of top-level nodes (no ids). Headings, - * + 1. 1) lists, [ ]/[x] tasks, indented plain lines,
+// "> " quotes (become the previous node's note), fenced code (kept as plain lines), --- rules and blank lines ignored.
+export function parseMarkdown(md){
+  const src=String(md||'').replace(/\r\n?/g,'\n').replace(/^\uFEFF/,'').split('\n');
+  const tops=[]; const stack=[]; // {lv,n}
+  let head=-1, listInd=[], inFence=false, last=null;
+  const push=(lv,n)=>{ while(stack.length&&stack[stack.length-1].lv>=lv) stack.pop(); (stack.length?(stack[stack.length-1].n.c=stack[stack.length-1].n.c||[]):tops).push(n); stack.push({lv,n}); last=n; };
+  const mk=(raw,extra={})=>{ const {t,links}=stripInline(raw.replace(/^\\(?=#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,'')); const n={t:t||'（空白）',...extra}; if(links.length) n.note=links.map(u=>'連結：'+u).join('\n'); return n; };
+  for(const line0 of src){ const line=line0.replace(/\t/g,'    ');
+    if(/^\s*(```|~~~)/.test(line)){ inFence=!inFence; continue; }
+    if(!line.trim()) continue;
+    if(!inFence&&/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) continue; // horizontal rule
+    let m;
+    if(!inFence&&(m=line.match(/^\s*>\s?(.*)$/))){ if(last){ const q=stripInline(m[1]).t; if(q) last.note=(last.note?last.note+'\n':'')+q; } else push(head+1,mk(m[1])); continue; }
+    if(!inFence&&(m=line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/))){ const lv=m[1].length-1; head=lv; listInd=[]; push(lv,mk(m[2])); continue; }
+    const ind=line.match(/^\s*/)[0].length; let text=line.trim(), extra={};
+    if(!inFence&&(m=text.match(/^([-*+]|\d{1,9}[.)])\s+(.*)$/))){ text=m[2]; const tk=text.match(/^\[([ xX])\]\s+(.*)$/); if(tk){ text=tk[2]; if(tk[1]!==' ') extra.done=true; } }
+    else if(!inFence&&(m=text.match(/^([-*+]|\d{1,9}[.)])$/))) continue; // empty bullet
+    while(listInd.length&&listInd[listInd.length-1]>ind) listInd.pop();
+    if(!listInd.length||listInd[listInd.length-1]<ind) listInd.push(ind);
+    push(head+listInd.length,mk(text,extra)); }
+  return tops; }
+const withIdsDeep=n=>({...n,id:newId(),...(n.c&&n.c.length?{c:n.c.map(withIdsDeep)}:{})});
+// Markdown → a whole map: root = the single top item, or the first H1 / first line with everything else under it.
+export function fromMarkdown(md,fallback='匯入的大綱'){ const tops=parseMarkdown(md); if(!tops.length) throw new Error('沒有內容');
+  let root; if(tops.length===1) root=tops[0];
+  else { root={...tops[0],c:[...(tops[0].c||[]),...tops.slice(1)]}; }
+  return withIdsDeep(root); }
+// Markdown → nodes to insert under a node: one top item = one child subtree; many = siblings.
+export const nodesFromMarkdown=md=>parseMarkdown(md).map(withIdsDeep);
+const escInline=t=>stripInline(t).t===t?t:t.replace(/[\\`*_\[\]~<>]/g,'\\$&');
+const escLine=t=>escInline(String(t||'').replace(/\s+/g,' ').trim()).replace(/^(\s*)(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,'$1\\$2');
+const noteLines=(note,ind)=>String(note).split('\n').filter(x=>x.trim()).map(x=>`${ind}> ${x.trim()}`);
+// Map/subtree → Markdown. Root: "# title"; descendants: nested "- " lists (2 spaces), done → "- [x]", notes → "> " lines.
+export function toMarkdown(node,{asRoot=true}={}){ const out=[];
+  const item=(c,lv)=>{ out.push(`${'  '.repeat(lv)}- ${c.done?'[x] ':''}${escLine(c.t)}`); if(c.note) out.push(...noteLines(c.note,'  '.repeat(lv+1))); (c.c||[]).forEach(k=>item(k,lv+1)); };
+  if(asRoot){ out.push(`# ${escLine(node.t)}`); if(node.note) out.push(...noteLines(node.note,'')); out.push(''); (node.c||[]).forEach(c=>item(c,0)); }
+  else item(node,0);
+  return out.join('\n')+'\n'; }
+// Subtree → simple HTML list (for pasting into docs), carrying the exact MyMind JSON for lossless paste back.
+export function toClipboardHTML(node,asRoot){ const e=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const li=n=>`<li>${e(n.t)}${n.c&&n.c.length?`<ul>${n.c.map(li).join('')}</ul>`:''}</li>`;
+  const data=btoa(unescape(encodeURIComponent(JSON.stringify({format:'mymind-nodes/1',nodes:[node]}))));
+  return `<div data-mymind="${data}">${asRoot?`<h1>${e(node.t)}</h1><ul>${(node.c||[]).map(li).join('')}</ul>`:`<ul>${li(node)}</ul>`}</div>`; }
+export function fromClipboardHTML(html){ const m=/data-mymind="([A-Za-z0-9+/=]+)"/.exec(html||''); if(!m) return null;
+  try{ const d=JSON.parse(decodeURIComponent(escape(atob(m[1])))); return d.format==='mymind-nodes/1'&&Array.isArray(d.nodes)?d.nodes:null; }catch{ return null; } }
 export function fromOPML(xml){ const d=new DOMParser().parseFromString(xml,'text/xml'); const body=d.querySelector('body'); if(!body) throw new Error('不是 OPML 檔');
   const conv=o=>({t:o.getAttribute('text')||o.getAttribute('title')||'',note:o.getAttribute('_note')||undefined,c:[...o.children].filter(x=>x.tagName==='outline').map(conv)});
   const tops=[...body.children].filter(x=>x.tagName==='outline'); const title=d.querySelector('head>title')?.textContent;
   return withIds(tops.length===1?conv(tops[0]):{t:title||'匯入的 OPML',c:tops.map(conv)}); }
-export function toMarkdown(root){ const out=[`# ${root.t}`,'']; (function w(n,lv){(n.c||[]).forEach(c=>{out.push(`${'  '.repeat(lv)}- ${c.t.replace(/\n/g,' ')}`); if(c.note) out.push(`${'  '.repeat(lv+1)}> ${c.note.replace(/\n/g,' ')}`); w(c,lv+1);});})(root,0); return out.join('\n')+'\n'; }
 export function toOPML(root){ const e=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const w=n=>`<outline text="${e(n.t)}"${n.note?` _note="${e(n.note)}"`:''}${n.c&&n.c.length?`>${n.c.map(w).join('')}</outline>`:'/>'}`;
   return `<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0"><head><title>${e(root.t)}</title></head><body>${w(root)}</body></opml>\n`; }

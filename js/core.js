@@ -18,7 +18,7 @@ export const P={
  back:'M15 18l-6-6 6-6', chevD:'M6 9l6 6 6-6', info:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5h.01', ext:'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
  kb:'M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M7 14h10', alert:'M12 3l10 18H2zM12 10v5M12 18h.01', laptop:'M4 5h16v11H4zM2 19h20', merge:'M6 3v6a6 6 0 0 0 6 6h6M18 21v-6M6 21v-4'
 };
-P.mini='M4 5h16v14H4zM12 11h6v6h-6z'; P.up='M12 19V5M6 11l6-6 6 6';
+P.paste='M9 4h6v3H9zM9 5.5H6V21h12V5.5h-3M9 12h6M9 16h4'; P.mini='M4 5h16v14H4zM12 11h6v6h-6z'; P.up='M12 19V5M6 11l6-6 6 6';
 export const I=(n,cls='i')=>`<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
 export const hex2=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
 export const toHex=a=>'#'+a.map(v=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,'0')).join('');
