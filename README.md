@@ -1,7 +1,8 @@
 # MyMind 心智圖
 
-一個用瀏覽器就能用的心智圖工具：向右展開的邏輯圖、鍵盤快速編輯、10 種主題、大綱檢視、手機版，
-資料存在**你自己的私人 GitHub 儲存庫**（每次儲存都是一個 commit，所以有完整版本紀錄），
+一個用瀏覽器就能用的心智圖工具：向右展開的邏輯圖、鍵盤快速編輯、10 種主題、大綱檢視、手機版。
+圖**先存在這個瀏覽器**（IndexedDB），不需要帳號；想多台裝置同步、保留版本紀錄時，
+可以選擇同步到**你自己的私人 GitHub 儲存庫**（手動或自動，一次同步只產生一個 commit）。
 也可以用你自己的 OpenAI 金鑰讓 AI 產生或展開心智圖。
 
 - 線上版：<https://hctsaik.github.io/mymind/>
@@ -10,14 +11,37 @@
 
 ## 隱私與金鑰
 
-- GitHub 金鑰（PAT）和 OpenAI 金鑰**只存在你這個瀏覽器的 localStorage**，不會上傳到任何其他地方，
+- 圖存在這個瀏覽器的 IndexedDB；GitHub 金鑰（PAT）和 OpenAI 金鑰**只存在你這個瀏覽器的 localStorage**，不會上傳到任何其他地方，
   也不會寫進這個程式碼庫。換一台電腦或瀏覽器要重新貼一次。
 - 瀏覽器只會直接連到 `api.github.com` 和 `api.openai.com`（網頁的 Content-Security-Policy 只允許這兩個）。
 - 共用電腦請在「設定 → 清除這個瀏覽器裡的金鑰」。
 - 這個 repo 有自動檢查（`scripts/check-secrets.sh`，pre-commit hook 和 GitHub Actions 都會跑），
   發現像金鑰的字串就拒絕提交。
 
-## 第一次設定
+## 儲存與同步
+
+打開 MyMind 選「先存在這個瀏覽器」就能直接用，GitHub 是選用的。到 **設定 → 儲存與同步** 可以選：
+
+| 同步方式 | 什麼時候上傳到 GitHub | commit 數量 |
+|---|---|---|
+| **只存瀏覽器**（新使用者預設） | 永遠不上傳，不連網路 | 0 |
+| **手動同步到 GitHub**（剛連接 GitHub 時的預設） | 按頁首的「同步」按鈕（徽章顯示幾項未同步）或 Ctrl+S | 每按一次 1 個 |
+| **自動同步** | 有修改後最多每 3 分鐘一次；切換分頁或關閉時也會同步 | 每批 1 個 |
+
+- 每次同步會把所有未同步的圖（和永久刪除的圖）用 git data API 寫成**一個 commit**。
+- 開啟時、按「同步」時、每 5 分鐘會從 GitHub 讀取其他裝置的修改（只讀，不會產生 commit）。
+- 兩邊都改過同一張圖時，可以選「合併兩邊」「保留我的」或「改用雲端（我的另存副本）」。
+
+### ⚠ 瀏覽器儲存可能會被清掉
+
+圖存在這個瀏覽器裡：**清除瀏覽資料／網站資料、使用無痕視窗**時可能會被刪除，換電腦或換瀏覽器也看不到。
+
+- 第一次建立圖時，MyMind 會請瀏覽器「長期保留」資料（`navigator.storage.persist()`）；設定頁可以看狀態。
+- **設定 → 儲存與同步 → 匯出全部備份（.mymind）**：一個 JSON 檔，包含所有圖（含垃圾桶），不含金鑰。
+- **從備份還原**（或首頁「匯入大綱」選 `.mymind` 檔）：沒有的圖新增，同一張圖保留較新的版本。
+- 只存瀏覽器時，7 天沒備份首頁會提醒你。
+
+## 連接 GitHub（選用）
 
 ### 1. 建立資料儲存庫
 
@@ -36,10 +60,11 @@
 5. **Permissions** → **Repository permissions** → **Contents** 設成 **Read and write**。
    （**Metadata: Read-only** 會自動加上，這是必要的。其他權限都不用開。）
 6. 按 **Generate token**，複製以 `github_pat_` 開頭的金鑰（只會顯示一次）。
-7. 打開 MyMind → 「連接 GitHub」或左下角齒輪 **設定 → GitHub 同步**：
+7. 打開 MyMind → 歡迎頁的「連接 GitHub」，或左下角齒輪 **設定 → GitHub 與 AI**：
    - 資料儲存庫：`hctsaik/mymind-data`
    - 金鑰：貼上剛剛的 `github_pat_…`
-   - 按 **測試連線**，看到「連線成功 · 私人儲存庫 · 可讀寫」後按 **儲存**。
+   - 按 **測試**，看到「連線成功 · 私人儲存庫 · 可讀寫」後按 **儲存**（同步方式會自動設成「手動同步」，可以到「儲存與同步」改成自動）。
+8. 原本只存在瀏覽器的圖會顯示在「同步」按鈕的徽章上，按一次「同步」就會全部上傳（1 個 commit）。
 
 ### 3. 取得 OpenAI API 金鑰（AI 功能才需要）
 
@@ -62,14 +87,15 @@
 - 衝突：另一台裝置先改過時，可以選「合併兩邊」「保留我的」或「改用雲端（我的另存副本）」。
 - 版本紀錄：每次儲存是一個 commit，可以預覽舊版本並還原。
 - AI：輸入主題或貼上筆記產生新圖；選一個節點用 AI 展開（Ctrl+J）。
-- 匯入 Markdown / OPML / .mymind.json；匯出 PNG（2x）、SVG、Markdown、OPML、JSON。
+- 匯入 Markdown / OPML / .mymind.json / .mymind 備份；匯出 PNG（2x）、SVG、Markdown、OPML、JSON。
 
 ## 本機開發
 
 ```bash
 python3 -m http.server 8765     # 然後打開 http://localhost:8765/
 npm i                           # 只有測試需要（playwright-core）
-node tests/e2e.mjs              # 端對端測試（GitHub 和 OpenAI 都是模擬的）
+node tests/e2e.mjs              # 端對端測試（GitHub 和 OpenAI 都是模擬的）：只存瀏覽器、手動同步、自動批次同步、備份還原、舊資料搬移
+GH_TOKEN=… node tests/roundtrip.mjs   # 對真的 mymind-data 做讀寫往返（金鑰只從環境變數讀，結束會刪掉測試圖）
 node tests/audit.mjs            # 對比度 / 點擊範圍 / 重疊檢查
 git config core.hooksPath .githooks   # 啟用提交前的金鑰檢查
 ```
@@ -84,11 +110,11 @@ css/app.css         樣式
 js/app.js           狀態、路由、編輯互動、同步
 js/mapview.js       版面配置與 SVG 繪製
 js/views.js         介面模板
-js/github.js        GitHub Contents API
+js/github.js        GitHub Contents API（讀）＋ git data API（一次同步一個 commit）
 js/merge.js         三方合併（依節點 id）
 js/ai.js            OpenAI Chat Completions
 js/io.js            匯入／匯出
-js/store.js         localStorage（設定、金鑰、離線快取）
+js/store.js         IndexedDB（圖）＋ localStorage（設定、金鑰）
 ```
 
 設計文件原本規劃 Vite + TypeScript；依需求改成不需要建置的純 JS 版本。

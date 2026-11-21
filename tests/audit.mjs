@@ -53,16 +53,20 @@ for(const [w,h] of [[1440,900],[390,844]]){
     else { await act(p,'exportMenu'); await audit(p,'export-menu'); await p.keyboard.press('Escape'); }
     const nb=await p.locator('#mapsvg g.node').nth(2).boundingBox(); await p.mouse.click(nb.x+nb.width/2,nb.y+nb.height/2,{button:'right'}); await p.waitForTimeout(200); await audit(p,'node-menu'); await p.keyboard.press('Escape');
     await selectL1(p); await act(p,'ai').catch(()=>act(p,'aiExpand')); await audit(p,'ai-dialog'); await act(p,'aiRun'); await audit(p,'ai-nokey'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
-    await act(p,'settings').catch(async()=>{ await act(p,'moreMenu'); await act(p,'settings'); }); await audit(p,'settings-gh'); await p.click('#st-a11y'); await p.waitForTimeout(150); await audit(p,'settings-a11y'); await p.keyboard.press('Escape');
+    await act(p,'settings').catch(async()=>{ await act(p,'moreMenu'); await act(p,'settings'); }); await p.click('#st-gh'); await p.waitForTimeout(150); await audit(p,'settings-gh'); await p.click('#st-a11y'); await p.waitForTimeout(150); await audit(p,'settings-a11y'); await p.keyboard.press('Escape');
     await p.ctx.close(); }
   // dark UI
   { const p=await page(w,h,{prefs:{mode:'local',ui:'dark'},docs,hash:'#/map/'+docs[2].id}); await audit(p,'dark-editor'); await act(p,'style'); await audit(p,'dark-style'); await p.goto(BASE+'#/'); await p.waitForTimeout(300); await audit(p,'dark-list'); await p.ctx.close(); }
+  // settings: storage tab; manual sync with unsynced badge
+  { const p=await page(w,h,{docs}); await act(p,'settings').catch(async()=>{ await act(p,'nav'); await act(p,'settings'); }); await audit(p,'settings-data'); await p.ctx.close(); }
+  { const gh=mockGH(); const d=docOf(trip()); const p=await page(w,h,{prefs:{mode:'github',repo:'hctsaik/mymind-data',sync:'manual'},docs:[d,docOf(dense(),'fresh')],gh,hash:'#/map/'+d.id}); await p.waitForTimeout(1500); await audit(p,'sync-manual-badge'); await p.goto(BASE+'#/'); await p.waitForTimeout(400); await audit(p,'list-manual'); if(w<700){ await act(p,'nav'); await audit(p,'nav-manual'); } await p.ctx.close(); }
+  { const p=await page(w,h,{prefs:{mode:'local',ui:'dark'},docs}); await audit(p,'dark-list-backupnote'); await act(p,'settings').catch(async()=>{ await act(p,'nav'); await act(p,'settings'); }); await audit(p,'dark-settings-data'); await p.ctx.close(); }
   // GitHub mode: history + conflict
-  { const gh=mockGH(); const d=docOf(trip()); const p=await page(w,h,{prefs:{mode:'github',repo:'hctsaik/mymind-data'},docs:[d],gh,hash:'#/map/'+d.id}); await p.keyboard.press('Control+s'); await p.waitForTimeout(800);
-    await selectL1(p); await p.keyboard.press('Tab'); await p.keyboard.type('新節點'); await p.keyboard.press('Enter'); await p.keyboard.press('Control+s'); await p.waitForTimeout(800);
+  { const gh=mockGH(); const d=docOf(trip()); const p=await page(w,h,{prefs:{mode:'github',repo:'hctsaik/mymind-data',sync:'manual'},docs:[d],gh,hash:'#/map/'+d.id}); await p.keyboard.press('Control+s'); await p.waitForTimeout(2500);
+    await selectL1(p); await p.keyboard.press('Tab'); await p.keyboard.type('新節點'); await p.keyboard.press('Enter'); await p.keyboard.press('Control+s'); await p.waitForTimeout(2500);
     await act(p,'history').catch(async()=>{ await act(p,'moreMenu'); await act(p,'history'); }); await p.waitForTimeout(500); await audit(p,'history');
     await p.locator('.hist li').last().click(); await p.waitForTimeout(500); await audit(p,'history-preview'); await act(p,'endPreview').catch(()=>{});
-    gh.serverEdit(`maps/${d.id}.json`,x=>{x.root.c[0].t='雲端版本';}); await selectL1(p); await p.keyboard.press('Tab'); await p.keyboard.type('本機'); await p.keyboard.press('Enter'); await p.keyboard.press('Control+s'); await p.waitForTimeout(900);
+    gh.serverEdit(`maps/${d.id}.json`,x=>{x.root.c[0].t='雲端版本';}); await selectL1(p); await p.keyboard.press('Tab'); await p.keyboard.type('本機'); await p.keyboard.press('Enter'); await p.keyboard.press('Control+s'); await p.waitForTimeout(2500);
     await audit(p,'conflict'); await p.ctx.close(); }
 }
 await b.close();

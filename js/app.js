@@ -1,8 +1,8 @@
 // MyMind app: state, routing, editor interactions, sync. Plain ES modules, no build step.
 import { I, esc, THEMES, DEFAULT_THEME, readable, lum, cr, mix } from './core.js';
 import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf } from './mapview.js';
-import { prefs, secrets, maps, newId } from './store.js';
-import { client, GitHubError } from './github.js';
+import { prefs, secrets, maps, newId, storage } from './store.js';
+import { client, GitHubError, blobSha } from './github.js';
 import { merge3, diffSummary } from './merge.js';
 import * as AI from './ai.js';
 import * as IO from './io.js';
@@ -10,7 +10,7 @@ import * as V from './views.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const P0=prefs.get();
 const S={view:'list',filter:'all',q:'',sideQ:'',sort:'updated',mapId:null,doc:null,sel:null,panel:'',tab:'theme',outline:false,
-  minimap:P0.minimap,hints:P0.hints,aibar:true,mode:P0.mode,repo:P0.repo,model:P0.model,lines:P0.lines,
+  minimap:P0.minimap,hints:P0.hints,aibar:true,mode:P0.mode,syncMode:P0.sync,remote:false,unsynced:0,repo:P0.repo,model:P0.model,lines:P0.lines,
   sync:{state:'saved',at:null,msg:''},hist:{items:[],loading:false,error:''},preview:null,undo:[],redo:[],vp:null,dialog:null,editing:null};
 window.__mm=S; // for tests/debugging (contains no secrets)
 const ensureIds=n=>{if(!n.id)n.id=newId();(n.c||[]).forEach(ensureIds);return n;};
@@ -30,11 +30,11 @@ function newDoc(root,theme=DEFAULT_THEME){ const now=new Date().toISOString(); c
   return {format:'mymind/1',id,theme,settings:{},icon:'🧠',created:now,updated:now,root}; }
 function metaFrom(doc,extra={}){ return {title:doc.root.t,icon:doc.icon,theme:doc.theme,updated:doc.updated,created:doc.created,star:!!doc.star,trashed:!!doc.trashed,trashedAt:doc.trashedAt||null,...extra}; }
 function storeDoc(doc,{dirty=true}={}){ maps.save(doc.id,doc); maps.setMeta(doc.id,metaFrom(doc,dirty?{dirty:true}:{})); }
-function createMap(root,{open=true,theme}={}){ const doc=newDoc(root,theme); storeDoc(doc); if(S.mode==='github') schedulePush(doc.id,200); if(open) location.hash='#/map/'+doc.id; return doc; }
+function createMap(root,{open=true,theme}={}){ const doc=newDoc(root,theme); storeDoc(doc); changed(); askPersist(); if(open) location.hash='#/map/'+doc.id; return doc; }
 // ---------- mutations / undo ----------
 function mutate(fn,{select,keepRedo}={}){ if(!S.doc||S.preview) return; S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>200)S.undo.shift(); if(!keepRedo)S.redo=[];
   fn(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
-function touch(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=S.mode==='github'?'dirty':'saved'; if(S.mode==='github') schedulePush(S.doc.id); drawAll(); }
+function touch(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=remote()?'dirty':'saved'; changed(); drawAll(); }
 function undo(){ if(!S.undo.length) return toast('沒有可以復原的動作'); S.redo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.undo.pop()); if(S.sel&&!find(S.doc.root,S.sel)) S.sel=S.doc.root.id; touch(); }
 function redo(){ if(!S.redo.length) return toast('沒有可以重做的動作'); S.undo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.redo.pop()); touch(); }
 const selInfo=()=>S.doc&&S.sel?find(S.doc.root,S.sel):null;
@@ -58,11 +58,11 @@ function route(){ const h=location.hash.replace(/^#\/?/,''); const [a,b]=h.split
   if(a==='map'&&b){ const d=maps.load(b); if(!d){ toast('找不到這張圖'); location.hash='#/'; return; } openDoc(d); return; }
   S.view='list'; S.filter=['starred','recent','trash'].includes(a)?a:'all'; closeDoc(); render(); }
 function openDoc(d){ if(S.mapId!==d.id){ S.undo=[];S.redo=[];S.preview=null;S.vp=null;S.panel=S.panel==='history'?'':S.panel; S.sel=d.root.id; S.outline=false; }
-  S.view='editor'; S.mapId=d.id; S.doc=d; maps.setMeta(d.id,{opened:new Date().toISOString()}); const m=maps.meta(d.id); S.sync.state=m&&m.dirty&&S.mode==='github'?'dirty':'saved'; render(); }
+  S.view='editor'; S.mapId=d.id; S.doc=d; maps.setMeta(d.id,{opened:new Date().toISOString()}); const m=maps.meta(d.id); if(S.sync.state!=='error'&&S.sync.state!=='offline') S.sync.state=m&&m.dirty&&remote()?'dirty':'saved'; render(); }
 function closeDoc(){ S.doc=null; S.mapId=null; S.editing=null; }
 // ---------- rendering ----------
 let shellKey='';
-function render(){ applyUi(); const side=$('#side'), main=$('#main'); const app=$('#app');
+function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main'); const app=$('#app');
   if(S.view==='welcome'){ app.classList.add('nosidebar'); side.innerHTML=''; main.innerHTML=V.welcome(); shellKey=''; $('#skip').href='#content'; $('#skip').textContent='跳到內容'; drawDialog(); return; }
   app.classList.remove('nosidebar'); side.innerHTML=V.sidebar(S,maps.index());
   if(S.view==='list'){ shellKey=''; main.innerHTML=V.home(S,maps.index(),id=>maps.load(id)); $('#skip').href='#content'; $('#skip').textContent='跳到內容'; }
@@ -72,7 +72,7 @@ function render(){ applyUi(); const side=$('#side'), main=$('#main'); const app=
     else drawAll(); }
   drawDialog(); }
 const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
-function drawChrome(){ if(S.view!=='editor') return; const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S);
+function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S);
   const bp=$('.backpill'); if(bp){bp.querySelector('.cn').textContent=curName(); bp.setAttribute('aria-label','回到列表（目前節點：'+curName()+'）');}
   $('#cv').style.setProperty('--cv',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas);
   const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
@@ -189,7 +189,7 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
 document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'), c=e.ctrlKey||e.metaKey;
   if(e.key==='Escape'&&closeMenu(true)) { e.preventDefault(); return; }
   if(S.dialog){ if(e.key==='Escape'){ e.preventDefault(); closeDialog(); } else if(e.key==='Tab') trapFocus(e); return; }
-  if(c&&e.key.toLowerCase()==='s'){ e.preventDefault(); if(S.doc) pushNow(S.doc.id); return; }
+  if(c&&e.key.toLowerCase()==='s'){ e.preventDefault(); if(remote()) pushNow(); else toast('已存在這個瀏覽器'+(secrets.pat()?'（目前設定：只存瀏覽器）':'')); return; }
   if(e.altKey&&e.key==='0'){ e.preventDefault(); $('#cv')?.focus(); return; }
   if(typing) { if(e.key==='Escape'&&S.panel&&t.closest('#panelHost')){ e.preventDefault(); closePanel(); } return; }
   if(c&&!e.shiftKey&&e.key.toLowerCase()==='z'){ if(S.doc){e.preventDefault();undo();} return; }
@@ -223,7 +223,7 @@ function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
   <hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('import','upload','匯入 Markdown／OPML 大綱')}
-  <hr>${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：GitHub 與 AI 金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
+  <hr>${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientRect();
   openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('exp','outline','Markdown 大綱','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openCardMenu(id,trigger){ const m=maps.meta(id), r=trigger.getBoundingClientRect();
@@ -240,7 +240,8 @@ function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove
   if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
 function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
   if(e.shiftKey&&document.activeElement===a){e.preventDefault();z.focus();} else if(!e.shiftKey&&document.activeElement===z){e.preventDefault();a.focus();} }
-function openSettings(tab='gh'){ const p=prefs.get(); openDialog({type:'settings',tab,repoBefore:p.repo,form:{repo:p.repo,pat:secrets.pat(),openai:secrets.openai(),model:p.model,lines:p.lines,ui:p.ui,reduceMotion:p.reduceMotion}}); }
+function openSettings(tab='data',extra={}){ const p=prefs.get(); const D={type:'settings',tab,repoBefore:p.repo,form:{repo:p.repo,pat:secrets.pat(),openai:secrets.openai(),model:p.model,lines:p.lines,ui:p.ui,reduceMotion:p.reduceMotion,sync:p.sync},syncTouched:false,lastBackup:p.lastBackup,backend:storage.backend,...extra}; openDialog(D);
+  Promise.all([storage.persisted(),storage.estimate()]).then(([per,est])=>{ D.persisted=per; D.usage=est&&est.usage; if(S.dialog===D) drawDialog(); }); }
 function askText(title,label,value,ok){ return new Promise(res=>openDialog({type:'prompt',title,label,input:value,ok:'確定',focus:'#pr-in',resolve:res,onClose:()=>res(null)})); }
 function confirmBox(title,sub,ok,danger){ return new Promise(res=>openDialog({type:'prompt',title,sub,ok,danger,resolve:res,onClose:()=>res(null)})); }
 // ---------- AI ----------
@@ -260,53 +261,80 @@ async function runAI(){ const D=S.dialog; if(!D||D.type!=='ai'||D.busy) return; 
   }catch(e){ if(e.name==='AbortError'){ D.busy=false; return drawDialog(); } D.busy=false; D.error={kind:e.kind||'http',message:e.message}; if(S.dialog===D) drawDialog(); else openDialog(D); } }
 function aiFromBar(text){ const f=S.doc&&(selInfo()||{n:S.doc.root}); openAI('expand',{hint:text}); runAI(); const q=$('#aiq'); if(q){q.value='';q.dispatchEvent(new Event('input'));} }
 // ---------- sync with GitHub ----------
-const gh=()=>{ const t=secrets.pat(); return S.mode==='github'&&t?client(t,S.repo):null; };
+// Modes (prefs.sync): 'local' = browser only (IndexedDB), never touches the network;
+// 'manual' = changes stay local until 同步 / Ctrl+S; 'auto' = batched: at most one commit every AUTO_MS, plus when the tab is hidden.
+// Every push sends ALL unsynced maps (and pending deletes) as ONE commit through the git data API.
+const remote=()=>S.syncMode!=='local'&&!!secrets.pat();
+const gh=()=>{ const t=secrets.pat(); return remote()?client(t,S.repo):null; };
 const pathOf=id=>`maps/${id}.json`;
-const pushT=new Map();
-function schedulePush(id,ms=3000){ clearTimeout(pushT.get(id)); pushT.set(id,setTimeout(()=>pushNow(id),ms)); }
+const AUTO_MS=()=>+prefs.get().autoMs||3*60*1000;
+function syncInfo(){ S.prefs=prefs.get(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); }
+let autoT=null, persistAsked=false;
+function changed(){ syncInfo(); if(S.remote&&S.syncMode==='auto') scheduleAuto(); if(S.view!=='editor') return; }
+function scheduleAuto(){ if(autoT) return; S.autoAt=Date.now()+AUTO_MS(); autoT=setTimeout(()=>{ autoT=null; S.autoAt=null; syncNow({reason:'auto'}); },AUTO_MS()); }
+function askPersist(){ if(persistAsked) return; persistAsked=true; storage.persist(); }
 function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='saved'?new Date().toISOString():S.sync.at}; drawChrome(); }
-const inflight=new Map();
-async function pushNow(id){ clearTimeout(pushT.get(id)); if(inflight.has(id)){ inflight.set(id,true); return inflight.get(id+':p'); }
-  inflight.set(id,false); let done; inflight.set(id+':p',new Promise(r=>done=r));
-  try{ await pushOnce(id); } finally { const again=inflight.get(id); inflight.delete(id); inflight.delete(id+':p'); done(); if(again) await pushNow(id); } }
-async function pushOnce(id){ const c=gh(); if(!c){ if(S.mode==='github') setSync('error','還沒設定金鑰'); return; }
-  const doc=maps.load(id), meta=maps.meta(id); if(!doc||!meta) return;
+let syncing=null, syncAgain=false;
+async function syncNow(opt={}){ if(syncing){ syncAgain=syncAgain||opt.push!==false; return syncing; }
+  syncing=(async()=>{ try{ await syncOnce(opt); } finally { syncing=null; if(syncAgain){ syncAgain=false; await syncNow(); } } })(); return syncing; }
+async function syncOnce({push=true,reason='manual'}={}){ const c=gh(); if(!c) return;
   if(!navigator.onLine){ setSync('offline'); return; }
-  const isCur=S.doc&&S.doc.id===id; if(isCur) setSync('saving');
-  try{ const text=JSON.stringify(doc,null,1)+'\n'; const r=await c.put(pathOf(id),text,meta.sha,`${meta.sha?'更新':'建立'}「${doc.root.t}」`);
-    const latest=maps.load(id); maps.setMeta(id,{sha:r.sha,remote:true,dirty:JSON.stringify(latest)!==JSON.stringify(doc)}); maps.saveBase(id,doc);
-    if(isCur) setSync(maps.meta(id).dirty?'dirty':'saved'); if(maps.meta(id).dirty) schedulePush(id); else if(!isCur) drawChrome();
-  }catch(e){ await onPushError(id,e,isCur); } }
-async function onPushError(id,e,isCur){
-  if(e.status===409||e.status===422&&/sha/i.test(e.message)||e.status===422&&/does not match/i.test(e.message)){ return openConflict(id); }
-  if(e.status===0){ if(isCur) setSync('offline'); return; }
-  const msg=e.status===401?'金鑰無效或過期（401）':e.status===403?'金鑰沒有寫入權限（403）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message; if(isCur) setSync('error',msg); else toast('同步失敗：'+msg); }
-async function openConflict(id){ const c=gh(); let remote; try{ remote=await c.get(pathOf(id)); }catch(e){ return setSync('error',e.message); }
-  const theirs=JSON.parse(remote.text), mine=maps.load(id), base=maps.base(id)||theirs; const T=THEMES[mine.theme]||THEMES[DEFAULT_THEME];
+  if(push&&maps.dirtyCount()||reason==='manual') setSync('saving'); let pulled=0, pushedN=0;
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      const files=(await c.list('maps')).filter(f=>f.name.endsWith('.json')); const rsha=new Map(files.map(f=>[f.name.replace(/\.json$/,''),f.sha]));
+      let conflicts=[];
+      if(push){ const dirty=maps.index().filter(m=>m.dirty); const dels=maps.deletes(); const changes=[], pushed=[];
+        for(const m of dirty){ const rs=rsha.get(m.id); if(rs&&rs!==m.sha){ conflicts.push(m.id); continue; } const doc=maps.load(m.id); if(!doc){ maps.setMeta(m.id,{dirty:false}); continue; }
+          const text=JSON.stringify(doc,null,1)+'\n'; changes.push({path:pathOf(m.id),text}); pushed.push({id:m.id,doc,text,title:doc.root.t}); }
+        const delIds=dels.filter(id=>rsha.has(id)); delIds.forEach(id=>changes.push({path:pathOf(id),del:true}));
+        if(changes.length){ const names=pushed.map(x=>'「'+x.title+'」');
+          const msg=pushed.length===1&&!delIds.length?`${maps.meta(pushed[0].id).sha?'更新':'建立'}${names[0]}`:`同步 ${pushed.length} 張心智圖${delIds.length?`、刪除 ${delIds.length} 張`:''}${names.length?'：'+names.slice(0,5).join('、')+(names.length>5?'…':''):''}`;
+          try{ await c.commitFiles(changes,msg); }
+          catch(e){ if((e.status===409||e.status===422)&&attempt===0) continue; throw e; } // someone else moved the branch: re-list and retry once
+          for(const x of pushed){ const sha=await blobSha(x.text); const latest=maps.load(x.id); maps.setMeta(x.id,{sha,remote:true,dirty:JSON.stringify(latest)!==JSON.stringify(x.doc)}); maps.saveBase(x.id,x.doc); rsha.set(x.id,sha); }
+          S.lastPush={at:Date.now(),maps:pushed.length,deletes:delIds.length}; pushedN=pushed.length+delIds.length; }
+        maps.setDeletes(maps.deletes().filter(id=>!dels.includes(id))); }
+      // pull: new or changed files from other devices (read-only, no commits)
+      const deletes=new Set(maps.deletes());
+      for(const [id,sha] of rsha){ const m=maps.meta(id); if(deletes.has(id)||m&&m.sha===sha) continue; if(m&&m.dirty){ if(!conflicts.includes(id)) conflicts.push(id); continue; }
+        const r=await c.blob(sha); let d; try{ d=JSON.parse(r.text); }catch{ continue; } if(!d||!d.root) continue; d.id=id; ensureIds(d.root);
+        maps.save(id,d); maps.saveBase(id,d); maps.setMeta(id,{...metaFrom(d),sha:r.sha,remote:true,dirty:false}); pulled++; if(S.mapId===id&&!S.editing){ S.doc=d; } }
+      for(const m of maps.index()){ if(m.remote&&!rsha.has(m.id)&&!m.dirty){ maps.remove(m.id); if(S.mapId===m.id) location.hash='#/'; } else if(m.remote&&!rsha.has(m.id)&&m.dirty) maps.setMeta(m.id,{sha:null}); }
+      syncInfo(); setSync(conflicts.length?'error':S.unsynced?'dirty':'saved',conflicts.length?'雲端有比較新的版本':'');
+      if(conflicts.length) await openConflict(conflicts[0],rsha.get(conflicts[0]));
+      if(reason==='manual'&&!conflicts.length) toast(pushedN?(pushedN>1?`已同步 ${pushedN} 項到 GitHub（1 個 commit）`:'已同步到 GitHub')+(pulled?`，並更新 ${pulled} 張其他裝置改過的圖`:''):pulled?`已從 GitHub 更新 ${pulled} 張圖`:'已是最新版本');
+      render(); return; }
+  }catch(e){ if(e.status===0) setSync('offline'); else setSync('error',e.status===401?'金鑰無效或過期（401）':e.status===403?'金鑰沒有寫入權限（403）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message); render(); } }
+const syncAll=()=>syncNow({push:S.syncMode==='auto'&&maps.dirtyCount()>0,reason:'auto'});
+const pushNow=()=>syncNow({reason:'manual'});
+async function openConflict(id,sha){ const c=gh(); let remoteF; try{ remoteF=sha?await c.blob(sha):await c.get(pathOf(id)); }catch(e){ return setSync('error',e.message); }
+  const theirs=JSON.parse(remoteF.text), mine=maps.load(id), base=maps.base(id)||theirs; const T=THEMES[mine.theme]||THEMES[DEFAULT_THEME];
   const svgOf=d=>{const r=layout(clone(d.root),T,d.settings||{});const {svg,b}=renderMap(r,T,{thumb:true});return `<svg viewBox="${b.x0-20} ${b.y0-20} ${b.w+40} ${b.h+40}" aria-hidden="true">${svg}</svg>`;};
   let when=''; try{ const cm=await c.commits(pathOf(id)); when=cm[0]?V.rel(cm[0].date):''; }catch{}
-  openDialog({type:'conflict',id,pick:'merge',title:mine.root.t,canvas:T.canvas,sha:remote.sha,remoteSha:remote.sha,theirs,mine,base,when,mineDiff:diffSummary(base,mine),theirsDiff:diffSummary(base,theirs),mineSvg:svgOf(mine),theirsSvg:svgOf(theirs)}); setSync('error','雲端有比較新的版本'); }
+  openDialog({type:'conflict',id,pick:'merge',title:mine.root.t,canvas:T.canvas,sha:remoteF.sha,remoteSha:remoteF.sha,theirs,mine,base,when,mineDiff:diffSummary(base,mine),theirsDiff:diffSummary(base,theirs),mineSvg:svgOf(mine),theirsSvg:svgOf(theirs)}); setSync('error','雲端有比較新的版本'); }
 async function applyConflict(){ const D=S.dialog; const {id,pick,theirs,mine,base,remoteSha}=D; S.dialog=null; drawDialog();
-  if(pick==='theirs'){ const copy={...clone(mine),id:newId(),root:{...clone(mine.root)}}; copy.root.t=mine.root.t+'（我的副本）'; storeDoc(copy); schedulePush(copy.id,500);
-    maps.save(id,theirs); maps.saveBase(id,theirs); maps.setMeta(id,{...metaFrom(theirs),sha:remoteSha,dirty:false}); if(S.mapId===id){S.doc=theirs;S.undo=[];} toast('已改用雲端版本；你的修改另存成副本'); }
+  if(pick==='theirs'){ const copy={...clone(mine),id:newId(),root:{...clone(mine.root)}}; copy.root.t=mine.root.t+'（我的副本）'; storeDoc(copy);
+    maps.save(id,theirs); maps.saveBase(id,theirs); maps.setMeta(id,{...metaFrom(theirs),sha:remoteSha,dirty:false,remote:true}); if(S.mapId===id){S.doc=theirs;S.undo=[];} toast('已改用雲端版本；你的修改另存成副本'); }
   else { let doc=mine; if(pick==='merge'){ const r=merge3(base,mine,theirs); doc=r.doc; if(r.conflicts) toast(`已合併；${r.conflicts} 處兩邊都改，保留了你的版本`); else toast('已自動合併兩邊的修改'); }
-    maps.save(id,doc); maps.setMeta(id,{...metaFrom(doc),sha:remoteSha,dirty:true}); if(S.mapId===id) S.doc=doc; await pushNow(id); }
-  render(); }
-let syncing=false;
-async function syncAll(){ const c=gh(); if(!c||syncing) return; syncing=true;
-  try{ const files=(await c.list('maps')).filter(f=>f.name.endsWith('.json')); const remoteIds=new Set();
-    for(const f of files){ const id=f.name.replace(/\.json$/,''); remoteIds.add(id); const m=maps.meta(id);
-      if(m&&m.sha===f.sha) continue;
-      if(m&&m.dirty&&m.sha){ continue; } // our push will detect the conflict
-      const r=await c.get(f.path); let d; try{ d=JSON.parse(r.text); }catch{ continue; } if(!d||!d.root) continue; d.id=id; ensureIds(d.root);
-      maps.save(id,d); maps.saveBase(id,d); maps.setMeta(id,{...metaFrom(d),sha:r.sha,remote:true,dirty:false}); if(S.mapId===id&&!S.editing){ S.doc=d; } }
-    for(const m of maps.index()){ if(m.remote&&!remoteIds.has(m.id)&&!m.dirty){ maps.remove(m.id); if(S.mapId===m.id){ location.hash='#/'; } } else if(!m.remote||m.dirty){ if(!remoteIds.has(m.id)) maps.setMeta(m.id,{sha:null}); schedulePush(m.id,300); } }
-    if(S.sync.state!=='dirty'&&S.sync.state!=='saving') setSync('saved'); render();
-  }catch(e){ if(e.status===0) setSync('offline'); else setSync('error',e.status===401?'金鑰無效或過期（401）':e.status===404?'找不到儲存庫或沒有權限（404）':e.message); render(); }
-  finally{ syncing=false; } }
-addEventListener('online',()=>{ if(S.mode==='github'){ syncAll(); maps.index().filter(m=>m.dirty).forEach(m=>schedulePush(m.id,500)); } });
-addEventListener('offline',()=>{ if(S.mode==='github') setSync('offline'); });
-setInterval(()=>{ if(S.mode==='github'&&document.visibilityState==='visible') syncAll(); },60000);
+    maps.save(id,doc); maps.saveBase(id,theirs); maps.setMeta(id,{...metaFrom(doc),sha:remoteSha,dirty:true}); if(S.mapId===id) S.doc=doc; }
+  render(); await syncNow({reason:'conflict'}); }
+addEventListener('online',()=>{ if(remote()) syncAll(); });
+addEventListener('offline',()=>{ if(remote()) setSync('offline'); });
+setInterval(()=>{ if(remote()&&document.visibilityState==='visible') syncNow({push:false,reason:'auto'}); },5*60000); // pull only
+// auto mode: flush when the tab is hidden or closed (best effort; anything left is pushed on the next visit)
+const flushAuto=()=>{ if(remote()&&S.syncMode==='auto'&&maps.dirtyCount()){ clearTimeout(autoT); autoT=null; syncNow({reason:'hidden'}); } };
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushAuto(); });
+addEventListener('pagehide',flushAuto);
+addEventListener('beforeunload',e=>{ if(remote()&&S.syncMode==='manual'&&maps.dirtyCount()){ e.preventDefault(); e.returnValue=''; } });
+// ---------- backup / restore (everything in this browser, one file) ----------
+function backupAll(){ const all=maps.index().map(m=>maps.load(m.id)).filter(Boolean); const d=new Date(); const stamp=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  IO.download(`mymind-backup-${stamp}.mymind`,JSON.stringify({format:'mymind-backup/1',exported:d.toISOString(),count:all.length,maps:all},null,1),'application/json');
+  prefs.set({lastBackup:d.toISOString()}); toast(`已匯出 ${all.length} 張心智圖的備份`); if(S.view==='list') render(); }
+function restoreBackup(data){ const list=Array.isArray(data.maps)?data.maps:[]; let added=0,updated=0,kept=0;
+  for(const d of list){ if(!d||!d.root||!d.id) continue; ensureIds(d.root); const cur=maps.load(d.id);
+    if(!cur){ storeDoc(d); added++; } else if((d.updated||'')>(cur.updated||'')){ storeDoc(d); updated++; } else kept++; }
+  changed(); render(); toast(`已還原：新增 ${added} 張、更新 ${updated} 張${kept?`、${kept} 張本機較新所以保留`:''}`); return {added,updated,kept}; }
 // history
 async function loadHistory(){ const c=gh(); S.hist={items:[],loading:!!c,error:''}; drawPanel(); if(!c) return; try{ S.hist.items=await c.commits(pathOf(S.mapId)); }catch(e){ S.hist.error=e.status===404?'找不到紀錄':e.message; } S.hist.loading=false; drawPanel(); }
 async function preview(sha){ const c=gh(); try{ const r=await c.get(pathOf(S.mapId),sha); const d=JSON.parse(r.text); const it=S.hist.items.find(i=>i.sha===sha); S.preview={sha,doc:d,label:it?V.rel(it.date):sha.slice(0,7)}; S.vpFor=null; render(); }catch(e){ toast('讀取版本失敗：'+e.message); } }
@@ -314,8 +342,8 @@ function endPreview(){ S.preview=null; render(); }
 function restorePreview(){ const d=S.preview.doc, label=S.preview.label; S.preview=null; render(); mutate(r=>{ r.t=d.root.t; r.c=clone(d.root.c||[]); FIELDS_ROOT.forEach(k=>{ if(d.root[k]!==undefined) r[k]=d.root[k]; else delete r[k]; }); }); S.doc.theme=d.theme||S.doc.theme; S.doc.settings=d.settings||{}; storeDoc(S.doc); toast('已還原到 '+label+'，儲存後會新增一個版本'); }
 const FIELDS_ROOT=['note','icon','pri','hl','collapsed'];
 // ---------- import / export ----------
-function pickFile(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.md,.markdown,.txt,.opml,.xml,.json'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; const text=await f.text();
-  try{ let root; if(/\.(opml|xml)$/i.test(f.name)||/^\s*<\?xml|<opml/i.test(text)) root=IO.fromOPML(text); else if(/\.json$/i.test(f.name)){ const d=JSON.parse(text); root=ensureIds(d.root||d); } else root=IO.fromMarkdown(text);
+function pickFile(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.md,.markdown,.txt,.opml,.xml,.json,.mymind'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; const text=await f.text();
+  try{ if(/\.mymind$/i.test(f.name)||/"format"\s*:\s*"mymind-backup/.test(text.slice(0,200))){ restoreBackup(JSON.parse(text)); return; } let root; if(/\.(opml|xml)$/i.test(f.name)||/^\s*<\?xml|<opml/i.test(text)) root=IO.fromOPML(text); else if(/\.json$/i.test(f.name)){ const d=JSON.parse(text); root=ensureIds(d.root||d); } else root=IO.fromMarkdown(text);
     const d=createMap(root); toast(`已匯入「${root.t}」，共 ${allDeep(root).length} 個節點`); }catch(e){ toast('匯入失敗：'+e.message); } }; inp.click(); }
 async function exportAs(kind,doc=S.doc){ const name=(doc.root.t||'mymind').replace(/[\\/:*?"<>|]/g,'_');
   if(kind==='md') return IO.download(name+'.md',IO.toMarkdown(doc.root),'text/markdown');
@@ -332,10 +360,10 @@ async function act(a,v,el){ const f=selInfo();
   case 'new': { createMap({t:'中心主題',c:[{t:'主題 1'},{t:'主題 2'},{t:'主題 3'}]}); setTimeout(()=>{ if(S.doc){S.sel=S.doc.root.id; drawAll(); startEdit(S.doc.root.id);} },60); break; }
   case 'nav': document.body.insertAdjacentHTML('beforeend',`<div class="navdrawer" role="dialog" aria-modal="true" aria-label="選單"><div class="scrim2" data-act="navClose"></div><aside class="side">${V.sidebar(S,maps.index())}</aside></div>`); $('.navdrawer .new-btn').focus(); break;
   case 'navClose': $('.navdrawer')?.remove(); break;
-  case 'settings': closeMenu(); if(S.dialog) S.dialog=null; openSettings('gh'); break;
+  case 'settings': closeMenu(); if(S.dialog) S.dialog=null; openSettings(v||'data'); break;
   case 'settingsA11y': closeMenu(); openSettings('a11y'); break;
-  case 'welcomeGithub': openSettings('gh'); break;
-  case 'welcomeLocal': prefs.set({mode:'local'}); S.mode='local'; location.hash='#/'; route(); break;
+  case 'welcomeGithub': openSettings('gh',{fromWelcome:true}); break;
+  case 'welcomeLocal': prefs.set({mode:'local',sync:'local'}); S.mode='local'; S.syncMode='local'; askPersist(); location.hash='#/'; route(); break;
   case 'closeDialog': closeDialog(); break;
   case 'scrim': if(el===event.target) closeDialog(); break;
   case 'setTab': if(S.dialog.form) readForm(S.dialog); S.dialog.tab=v; drawDialog(); $(`#st-${v}`)?.focus(); break;
@@ -346,11 +374,21 @@ async function act(a,v,el){ const f=selInfo();
     try{ const c=client(D.form.pat.trim(),D.form.repo.trim()); const t=await c.test(); let canWrite=t.push; D.test=canWrite?{ok:true,msg:`連線成功 · ${t.private?'私人儲存庫':'⚠ 這是公開儲存庫'} · 可讀寫`}:{ok:false,msg:'可以讀取但沒有寫入權限：請把 Contents 設成 Read and write'}; }
     catch(e){ D.test={ok:false,msg:e.status===401?'金鑰無效或過期（401）':e.status===404?'找不到儲存庫：確認名稱，並確認金鑰有勾選 mymind-data（404）':e.status===0?'網路連線失敗':e.message}; }
     if(S.dialog===D) drawDialog(); break; }
-  case 'saveSettings': { const D=S.dialog; readForm(D); const p={repo:D.form.repo.trim()||'hctsaik/mymind-data',model:D.form.model.trim()||'gpt-4o-mini'}; secrets.setPat(D.form.pat.trim()); secrets.setOpenai(D.form.openai.trim());
-    const wasMode=S.mode; if(D.form.pat.trim()){ p.mode='github'; } else if(!S.mode) p.mode='local'; prefs.set(p); Object.assign(S,{repo:p.repo,model:p.model,mode:prefs.get().mode});
-    if(wasMode==='github'&&p.mode==='github'&&D.repoBefore&&D.repoBefore!==p.repo){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); }
-    closeDialog(); toast(S.mode==='github'?'已儲存，開始同步':'已儲存'); if(!wasMode) location.hash='#/'; route(); if(S.mode==='github') syncAll(); break; }
-  case 'clearKeys': { secrets.clear(); prefs.set({mode:'local'}); S.mode='local'; S.dialog.form.pat=''; S.dialog.form.openai=''; drawDialog(); toast('已清除這個瀏覽器裡的金鑰'); render(); break; }
+  case 'formSync': readForm(S.dialog); S.dialog.form.sync=v; S.dialog.syncTouched=true; S.dialog.syncErr=null; drawDialog(); $(`[data-act="formSync"][data-v="${v}"]`)?.focus(); break;
+  case 'askPersist': { const ok=await storage.persist(); S.dialog&&(S.dialog.persisted=ok); drawDialog(); toast(ok?'瀏覽器已同意保留資料':'瀏覽器沒有同意；記得定期匯出備份'); break; }
+  case 'backup': closeMenu(); backupAll(); if(S.dialog) { S.dialog.lastBackup=prefs.get().lastBackup; drawDialog(); } break;
+  case 'restore': closeMenu(); { const inp=document.createElement('input'); inp.type='file'; inp.accept='.mymind,.json'; inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); if(d.format!=='mymind-backup/1') throw new Error('這不是 MyMind 備份檔'); restoreBackup(d); }catch(e){ toast('還原失敗：'+e.message); } }; inp.click(); } break;
+  case 'dismissBackup': prefs.set({backupSnooze:new Date().toISOString()}); render(); break;
+  case 'syncNow': closeMenu(); if(!remote()){ openSettings('data'); break; } await pushNow(); break;
+  case 'saveSettings': { const D=S.dialog; readForm(D); const pat=D.form.pat.trim();
+    let sync=D.form.sync; if(pat&&!secrets.pat()&&sync==='local'&&!D.syncTouched) sync='manual'; // just connected GitHub: default to manual sync
+    if(sync!=='local'&&!pat){ D.tab='gh'; D.syncErr='要同步到 GitHub，請先貼上金鑰並按「測試」；或選「只存瀏覽器」。'; drawDialog(); $('#f-pat')?.focus(); break; }
+    const p={repo:D.form.repo.trim()||'hctsaik/mymind-data',model:D.form.model.trim()||'gpt-4o-mini',sync}; secrets.setPat(pat); secrets.setOpenai(D.form.openai.trim());
+    const wasMode=S.mode; p.mode=pat?'github':(S.mode||'local'); prefs.set(p); Object.assign(S,{repo:p.repo,model:p.model,mode:p.mode,syncMode:p.sync});
+    if(D.repoBefore&&D.repoBefore!==p.repo){ maps.index().forEach(m=>maps.setMeta(m.id,{sha:null,remote:false,dirty:true})); maps.setDeletes([]); }
+    closeDialog(); toast(sync==='local'?'已儲存：只存在這個瀏覽器':sync==='manual'?'已儲存：按「同步」才會上傳':'已儲存：自動同步（每幾分鐘最多一次）'); if(!wasMode) location.hash='#/'; route();
+    if(remote()) syncNow({push:sync==='auto',reason:'auto'}); break; }
+  case 'clearKeys': { secrets.clear(); prefs.set({sync:'local'}); S.syncMode='local'; S.dialog.form.pat=''; S.dialog.form.openai=''; S.dialog.form.sync='local'; drawDialog(); toast('已清除這個瀏覽器裡的金鑰；圖仍存在這個瀏覽器'); render(); break; }
   case 'undo': undo(); break; case 'redo': redo(); break;
   case 'addChild': closeMenu(); addChild(); break; case 'addSibling': closeMenu(); addSibling(); break; case 'outdent': closeMenu(); outdent(); break;
   case 'edit': closeMenu(); startEdit(S.sel); break;
@@ -398,15 +436,14 @@ async function act(a,v,el){ const f=selInfo();
   case 'promptOk': { const D=S.dialog; const val=D.input!==undefined?$('#pr-in').value:true; D.onClose=null; S.dialog=null; drawDialog(); D.resolve(val); break; }
   case 'cardMenu': openCardMenu(v,el); break;
   case 'openMap': closeMenu(); location.hash='#/map/'+v; break;
-  case 'renameMap': { closeMenu(); const d=maps.load(v); const t=await askText('重新命名','名稱',d.root.t); if(t&&t.trim()){ d.root.t=t.trim(); d.updated=new Date().toISOString(); storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); } break; }
-  case 'dupMap': { closeMenu(); const d=maps.load(v); const cp=clone(d); cp.id=newId(); cp.root.t=d.root.t+'（副本）'; cp.created=cp.updated=new Date().toISOString(); storeDoc(cp); if(S.mode==='github') schedulePush(cp.id,300); render(); toast('已建立副本'); break; }
-  case 'starMap': { closeMenu(); const d=maps.load(v); d.star=!d.star; storeDoc(d); if(S.mode==='github') schedulePush(v,500); render(); break; }
+  case 'renameMap': { closeMenu(); const d=maps.load(v); const t=await askText('重新命名','名稱',d.root.t); if(t&&t.trim()){ d.root.t=t.trim(); d.updated=new Date().toISOString(); storeDoc(d); changed(); render(); } break; }
+  case 'dupMap': { closeMenu(); const d=maps.load(v); const cp=clone(d); cp.id=newId(); cp.root.t=d.root.t+'（副本）'; cp.created=cp.updated=new Date().toISOString(); storeDoc(cp); changed(); render(); toast('已建立副本'); break; }
+  case 'starMap': { closeMenu(); const d=maps.load(v); d.star=!d.star; storeDoc(d); changed(); render(); break; }
   case 'expMapMd': closeMenu(); exportAs('md',maps.load(v)); break;
-  case 'trashMap': { closeMenu(); const d=maps.load(v); d.trashed=true; d.trashedAt=new Date().toISOString(); storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); toast('已移到垃圾桶',['還原','undoTrash:'+v]); break; }
-  case 'restoreMap': { closeMenu(); const d=maps.load(v); delete d.trashed; delete d.trashedAt; storeDoc(d); if(S.mode==='github') schedulePush(v,300); render(); toast('已還原'); break; }
-  case 'purgeMap': { closeMenu(); const ok=await confirmBox('永久刪除這張圖？','「'+maps.meta(v).title+'」會從'+(S.mode==='github'?' GitHub 儲存庫':'這個瀏覽器')+'刪除。舊版本仍留在 git 歷史裡。','永久刪除',true); if(!ok) return;
-    const m=maps.meta(v); if(S.mode==='github'&&m.remote){ try{ let sha=m.sha; if(!sha){ sha=(await gh().get(pathOf(v))).sha; } await gh().remove(pathOf(v),sha,`刪除「${m.title}」`); }catch(e){ if(e.status!==404) return toast('刪除失敗：'+e.message); } }
-    maps.remove(v); render(); toast('已永久刪除'); break; }
+  case 'trashMap': { closeMenu(); const d=maps.load(v); d.trashed=true; d.trashedAt=new Date().toISOString(); storeDoc(d); changed(); render(); toast('已移到垃圾桶',['還原','undoTrash:'+v]); break; }
+  case 'restoreMap': { closeMenu(); const d=maps.load(v); delete d.trashed; delete d.trashedAt; storeDoc(d); changed(); render(); toast('已還原'); break; }
+  case 'purgeMap': { closeMenu(); const ok=await confirmBox('永久刪除這張圖？','「'+maps.meta(v).title+'」會從這個瀏覽器刪除'+(maps.meta(v).remote?'；下次同步時也會從 GitHub 儲存庫刪除（舊版本仍留在 git 歷史裡）':'')+'。','永久刪除',true); if(!ok) return;
+    const m=maps.meta(v); if(m.remote) maps.setDeletes([...maps.deletes(),v]); maps.remove(v); changed(); render(); toast('已永久刪除'); break; }
   case 'clearSearch': S.q=''; render(); $('#homeq')?.focus(); break;
   case 'sort': S.sort=v; render(); break;
   case 'closeMenu': closeMenu(true); break;
@@ -427,6 +464,6 @@ document.addEventListener('keydown',e=>{ // roving tabindex for tablists
   if(t.matches&&t.matches('.hist li[role=button]')&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); t.click(); } },true);
 let rT; addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ shellKey=''; render(); },150); });
 addEventListener('hashchange',route);
-addEventListener('beforeunload',e=>{ if(S.mode==='github'&&maps.index().some(m=>m.dirty)&&navigator.onLine){ maps.index().filter(m=>m.dirty).forEach(m=>pushNow(m.id)); } });
 // boot
-applyUi(); route(); if(S.mode==='github') syncAll(); document.body.dataset.ready='1';
+(async()=>{ await storage.init(); syncInfo(); applyUi(); route(); document.body.dataset.ready='1'; if(maps.index().length) askPersist(); if(remote()) syncAll(); })();
+window.__mmStore={maps,storage,flush:()=>storage.flush(),syncNow:o=>syncNow(o)}; // test hooks (no secrets)

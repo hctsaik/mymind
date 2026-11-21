@@ -532,3 +532,43 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--pa
   .opt select{min-height:44px;width:100%}
   .side-foot .sync .linkbtn{min-height:44px;display:inline-flex;align-items:center}
 }
+/* ---- v1.1: browser storage, sync modes, backup ---- */
+.syncbtn{position:relative;gap:6px}
+.syncbtn .nbadge{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:11.5px;font-weight:700;display:inline-grid;place-items:center;line-height:1}
+.syncbtn.has{border-color:var(--accent);color:var(--accent)}
+.syncbtn[aria-busy=true] svg{animation:mmpulse 1.2s ease-in-out infinite}
+@keyframes mmpulse{50%{opacity:.35}}
+.side-sync{height:36px;padding:0 10px;font-size:12.5px;flex:none}
+.side-foot .sync{flex:1}
+.sync .repo{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}
+.tagopt{font-size:11.5px;background:var(--panel-2);color:var(--text-2);padding:1px 8px;border-radius:999px;font-weight:600;border:1px solid var(--border)}
+.wnote{font-size:12.5px;color:var(--warn-text);background:var(--warn-bg);border-radius:8px;padding:6px 10px;display:flex;gap:6px;align-items:flex-start;line-height:1.5}
+.wnote svg{width:15px;height:15px;flex:none;margin-top:2px}
+.wnote2{font-size:12.5px;color:var(--text-2)}
+.wfoot{margin-top:18px;font-size:12.5px;color:var(--text-2);text-align:center}
+.syncopts{grid-template-columns:1fr}
+.alert.warn{background:var(--warn-bg);color:var(--warn-text);border:1px solid var(--warn-line)}
+.kv{list-style:none;margin:12px 0;font-size:13px;border:1px solid var(--border);border-radius:12px}
+.kv li{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);min-height:44px;flex-wrap:wrap}
+.kv li:last-child{border-bottom:0}
+.kv li span{color:var(--text-2);width:80px;flex:none}
+.kv li b{font-weight:600;flex:1;min-width:0}
+.kv li .btn{height:32px}
+.bkacts{display:flex;gap:8px;flex-wrap:wrap}
+.bkacts .btn{height:44px}
+.backupnote{margin:12px 0 4px;align-items:center;flex-wrap:wrap}
+.backupnote>div:first-of-type{flex:1;min-width:200px}
+.backupnote .bacts{display:flex;gap:8px;flex:none}
+.backupnote .btn{height:36px}
+@media (max-width:768px){
+  .syncbtn.rbs{width:44px;height:44px;padding:0;justify-content:center;border-radius:50%;background:var(--panel);box-shadow:0 2px 8px rgba(31,35,41,.14)}
+  .top .syncbtn .lbl{display:none}
+  .top .syncbtn{height:44px;min-width:44px;padding:0 10px;border-radius:999px;background:var(--panel);box-shadow:0 2px 8px rgba(31,35,41,.14)}
+  .top .syncbtn .nbadge{position:absolute;top:-4px;right:-4px}
+  .side-sync,.kv li .btn,.backupnote .btn{height:44px}
+  .choices{grid-template-columns:1fr}
+}
+.side-syncrow{padding:8px 8px 0}
+.side-syncrow .side-sync{width:100%;height:40px;justify-content:center}
+.sync .repo{max-width:150px}
+@media (max-width:768px){.side-syncrow .side-sync{height:44px}}
