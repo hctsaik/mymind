@@ -78,13 +78,15 @@ function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side');
   $('#cv').style.setProperty('--cv',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas);
   const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
 function drawPanel(){ const h=$('#panelHost'); if(!h) return; const f=selInfo();
-  const html=S.panel==='style'?V.stylePanel(S,S.doc,f&&f.n):S.panel==='history'?V.historyPanel(S):S.panel==='note'&&f?V.notePanel(f.n):'';
-  if(h.dataset.k===S.panel+'|'+S.sel&&S.panel==='note') return; // keep textarea focus while typing
+  const key=S.panel+'|'+S.sel+'|'+(S.panelRev||0);
+  if(h.dataset.k===key&&S.panel==='note') return; // keep textarea focus while typing
+  const html=S.panel==='style'?V.stylePanel(S,S.doc,f&&f.n):S.panel==='history'?V.historyPanel(S):S.panel==='note'&&f?V.notePanel(f.n,{doc:S.doc,allTags:allTags(),linkErr:S.linkErr,imgErr:S.imgErr}):'';
   const focusId=document.activeElement&&h.contains(document.activeElement)?document.activeElement.dataset.act+'|'+(document.activeElement.dataset.v||''):null;
-  h.innerHTML=html; h.dataset.k=S.panel+'|'+S.sel;
+  h.innerHTML=html; h.dataset.k=key;
   if(focusId){const [a,v]=focusId.split('|'); const el=h.querySelector(`[data-act="${a}"]${v?`[data-v="${CSS.escape(v)}"]`:''}`); if(el) el.focus();} }
 function drawAll(first){ if(S.view!=='editor'||!S.doc) return; drawChrome(); drawPanel();
-  const oh=$('#outlineHost'); if(oh) oh.innerHTML=S.outline?V.outlineView((S.preview?S.preview.doc:S.doc).root):'';
+  const oh=$('#outlineHost'); if(oh){ const ae=document.activeElement, keep=S.olFocus||(ae&&ae.classList&&ae.classList.contains('olin')?{id:ae.dataset.olid,pos:ae.selectionStart}:null); S.olFocus=null; const sy=oh.firstElementChild?oh.firstElementChild.scrollTop:0;
+    oh.innerHTML=S.outline?V.outlineView((S.preview?S.preview.doc:S.doc).root,S):''; if(S.outline&&oh.firstElementChild) oh.firstElementChild.scrollTop=sy; if(S.outline&&keep) olFocus(keep.id,keep.pos); }
   applyInsets(); drawMap(first); }
 function applyInsets(){ const cv=$('#cv'), st=$('#stage'); if(!cv) return; const R=cv.getBoundingClientRect(), ins={top:0,right:0,bottom:0,left:0}, G=8;
   cv.querySelectorAll('[data-dock]').forEach(e=>{ e.getAnimations({subtree:true}).forEach(a=>a.finish()); const cs=getComputedStyle(e); if(cs.display==='none'||cs.visibility==='hidden') return; const r=e.getBoundingClientRect(); if(r.width<1||r.height<1) return;
@@ -93,6 +95,10 @@ function applyInsets(){ const cv=$('#cv'), st=$('#stage'); if(!cv) return; const
   st.style.inset=`${ins.top}px ${ins.right}px ${ins.bottom}px ${ins.left}px`; S.safe=ins; window.__SAFE=ins; }
 function laidOut(){ const doc=S.preview?S.preview.doc:S.doc; const r=layout(clone(doc.root),th(),doc.settings||{}); const by=new Map(); allDeep(r).forEach(n=>by.set(n.id,n)); return {r,by}; }
 function initialView(r){ const st=$('#stage'), W=st.clientWidth, H=st.clientHeight, m=isM(), b=bounds(r), PAD=m?16:28, big=all(r).length>120;
+  if(r.layout==='balanced'||r.layout==='org'){ const sc=Math.max(m?.62:.5,Math.min(1,(W-2*PAD)/b.w,(H-2*PAD)/b.h)); const tx=b.w*sc<=W-2*PAD?W/2-(b.x0+b.w/2)*sc:W/2-r.x*sc;
+    let ty=r.layout==='org'?(b.h*sc<=H-2*PAD?H/2-(b.y0+b.h/2)*sc:PAD-b.y0*sc):(b.h*sc<=H-2*PAD?H/2-(b.y0+b.h/2)*sc:H/2-r.y*sc);
+    // phone + org chart wider than the screen: start at the top-left (first branch and the root in view), pan right for more
+    if(m&&r.layout==='org'&&b.w*sc>W-2*PAD) return {sc,tx:Math.min(PAD-b.x0*sc,W-PAD-(r.x+r.w/2)*sc),ty:84-b.y0*sc}; return {tx,ty,sc}; }
   const L1=[r,...kids(r)], l1={x1:Math.max(...L1.map(n=>n.x+n.w/2)),y0:Math.min(...L1.map(n=>n.y-n.h/2)),y1:Math.max(...L1.map(n=>n.y+n.h/2))}; let sc,tx,ty;
   if(big){ sc=m?Math.max(.5,Math.min(.72,(W-2*PAD)/(l1.x1-b.x0))):Math.max(.7,Math.min(1,(W-2*PAD)/b.w)); tx=PAD-b.x0*sc; ty=((S.doc.settings||{}).rootTop??th().rootTop)?PAD-b.y0*sc:H*.45-r.y*sc; }
   else if(m){ sc=Math.max(.5,Math.min(1,(W-2*PAD)/(l1.x1-b.x0),(H-2*PAD)/(l1.y1-l1.y0))); tx=PAD-b.x0*sc; if(b.w*sc<=W-2*PAD) tx=W/2-(b.x0+b.w/2)*sc; ty=H/2-((l1.y0+l1.y1)/2)*sc; if(b.h*sc<=H-2*PAD) ty=H/2-(b.y0+b.h/2)*sc; }
@@ -121,6 +127,41 @@ function zoomAt(f,cx,cy){ const st=$('#stage'); if(cx===undefined){cx=st.clientW
 function fit(){ const r=lay.r, st=$('#stage'), b=bounds(r), PAD=isM()?16:28; const sc=Math.max(.15,Math.min(1.2,(st.clientWidth-2*PAD)/b.w,(st.clientHeight-2*PAD)/b.h)); S.vp={sc,tx:st.clientWidth/2-(b.x0+b.w/2)*sc,ty:st.clientHeight/2-(b.y0+b.h/2)*sc}; drawMap(); }
 function ensureVisible(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) return; const {tx,ty,sc}=S.vp, x0=tx+(n.x-n.w/2)*sc, x1=tx+(n.x+n.w/2+40)*sc, y0=ty+(n.y-n.h/2)*sc, y1=ty+(n.y+n.h/2)*sc, W=st.clientWidth, H=st.clientHeight, M=24; let dx=0,dy=0;
   if(x1>W-M) dx=W-M-x1; if(x0+dx<M) dx=M-x0; if(y1>H-M) dy=H-M-y1; if(y0+dy<M) dy=M-y0; if(dx||dy){S.vp={...S.vp,tx:tx+dx,ty:ty+dy}; applyVp();} }
+// ---------- v1.4: outline editing, node details, icons, images ----------
+const allTags=()=>S.doc?[...new Set(allDeep(S.doc.root).flatMap(n=>Array.isArray(n.tags)?n.tags:(n.tag?[n.tag]:[])))]:[];
+const tagsOfN=n=>Array.isArray(n.tags)?n.tags:(n.tag?[n.tag]:[]);
+function olFocus(id,pos){ const el=document.querySelector(`.olin[data-olid="${CSS.escape(id)}"]`); if(!el) return; el.focus({preventScroll:false}); const p=pos==null?el.value.length:Math.min(pos,el.value.length); try{ el.setSelectionRange(p,p); }catch{} el.scrollIntoView({block:'nearest'}); S.olId=id; $$('.olr.cur').forEach(r=>r.classList.remove('cur')); el.closest('.olr')?.classList.add('cur'); }
+function quietSave(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=remote()?'dirty':'saved'; changed(); drawChrome(); }
+let olT;
+function olVisible(){ return $$('.olin').map(e=>e.dataset.olid); }
+function olOp(op,id=S.olId){ if(!S.doc||S.preview||!id) return; const f=find(S.doc.root,id); if(!f) return; let focus=id, pos=null;
+  if(op==='add'){ const n={id:newId(),t:''}; mutate(r=>{ const g=find(r,id); if(!g.parent||(g.n.c&&g.n.c.length&&!g.n.collapsed)){ g.n.c=g.n.c||[]; g.n.c.unshift(n); delete g.n.collapsed; } else g.parent.c.splice(g.idx+1,0,n); },{select:n.id}); focus=n.id; }
+  else if(op==='indent'){ if(!f.parent||f.idx===0) return toast('第一個子項目不能再縮排'); pos=$(`.olin[data-olid="${CSS.escape(id)}"]`)?.selectionStart; mutate(r=>{ const g=find(r,id), prev=g.parent.c[g.idx-1]; g.parent.c.splice(g.idx,1); prev.c=prev.c||[]; prev.c.push(g.n); delete prev.collapsed; }); }
+  else if(op==='outdent'){ if(!f.parent||f.parent.id===S.doc.root.id) return toast(f.parent?'已經是第一層':'中心主題不能移動'); pos=$(`.olin[data-olid="${CSS.escape(id)}"]`)?.selectionStart; mutate(r=>{ const g=find(r,id), gp=find(r,g.parent.id); g.parent.c.splice(g.idx,1); gp.parent.c.splice(gp.idx+1,0,g.n); }); }
+  else if(op==='up'||op==='down'){ if(!f.parent) return; const j=f.idx+(op==='up'?-1:1); if(j<0||j>=f.parent.c.length) return; pos=$(`.olin[data-olid="${CSS.escape(id)}"]`)?.selectionStart; mutate(r=>{ const g=find(r,id), a=g.parent.c; [a[g.idx],a[j]]=[a[j],a[g.idx]]; }); }
+  else if(op==='del'){ if(!f.parent) return toast('中心主題不能刪除'); const vis=olVisible(), i=vis.indexOf(id); focus=vis[i-1]||f.parent.id; const cnt=allDeep(f.n).length; mutate(r=>{ const g=find(r,id); g.parent.c.splice(g.idx,1); },{select:focus}); if(cnt>1) toast(`已刪除 ${cnt} 個節點`,['復原','undo']); }
+  S.sel=focus; S.olFocus={id:focus,pos}; drawAll(); }
+function olKey(e,t){ const id=t.dataset.olid, c=e.ctrlKey||e.metaKey; if(e.isComposing||e.keyCode===229) return false;
+  if(e.key==='Enter'){ e.preventDefault(); olOp('add',id); return true; }
+  if(e.key==='Tab'){ e.preventDefault(); olOp(e.shiftKey?'outdent':'indent',id); return true; }
+  if(e.key==='Backspace'&&t.value===''&&t.selectionStart===0){ e.preventDefault(); olOp('del',id); return true; }
+  if((e.key==='ArrowUp'||e.key==='ArrowDown')&&(e.altKey||(c&&e.shiftKey))){ e.preventDefault(); olOp(e.key==='ArrowUp'?'up':'down',id); return true; }
+  if((e.key==='ArrowUp'||e.key==='ArrowDown')&&!c&&!e.shiftKey){ e.preventDefault(); const v=olVisible(), i=v.indexOf(id), n=v[i+(e.key==='ArrowUp'?-1:1)]; if(n) olFocus(n,t.selectionStart); return true; }
+  if(c&&(e.key==='z'||e.key==='Z'||e.key==='y')){ e.preventDefault(); S.olFocus={id,pos:t.selectionStart}; (e.key==='y'||e.shiftKey)?redo():undo(); return true; }
+  if(c&&e.key==='.'){ e.preventDefault(); toggleCollapse(id); S.olFocus={id}; return true; }
+  if(e.key==='Escape'){ e.preventDefault(); S.outline=false; S.sel=id; render(); ensureVisible(id); $('#cv')?.focus(); return true; }
+  return false; }
+function normLink(v){ v=String(v||'').trim(); if(!v) return ''; if(!/^[a-z][a-z0-9+.-]*:/i.test(v)) v='https://'+v; try{ const u=new URL(v); if(!/^https?:$/.test(u.protocol)||!u.hostname.includes('.')&&u.hostname!=='localhost') return null; return u.href; }catch{ return null; } }
+function panelRefresh(){ S.panelRev=(S.panelRev||0)+1; drawPanel(); }
+function addTag(v){ const f=selInfo(); if(!f) return; const t=String(v||'').trim().replace(/^#+/,'').replace(/\s+/g,'_').slice(0,24); if(!t) return; const cur=tagsOfN(f.n); if(cur.includes(t)) return toast('已經有這個標籤');
+  mutate(r=>{ const x=find(r,f.n.id).n; x.tags=[...tagsOfN(x),t]; delete x.tag; }); panelRefresh(); setTimeout(()=>$('#tagin')?.focus(),0); }
+const IMG_LIMIT=150*1024, IMG_SIDE=640;
+async function shrinkImage(blob){ if(blob.size>8*1024*1024) throw new Error('圖片超過 8 MB，請先縮小'); const bm=await createImageBitmap(blob); const k=Math.min(1,IMG_SIDE/Math.max(bm.width,bm.height)); let w=Math.round(bm.width*k), h=Math.round(bm.height*k);
+  for(let tries=0;tries<6;tries++){ const c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d'); x.fillStyle='#FFFFFF'; x.fillRect(0,0,w,h); x.drawImage(bm,0,0,w,h);
+    for(const q of [.85,.72,.6]){ const url=c.toDataURL('image/jpeg',q); if(url.length*3/4<=IMG_LIMIT) return {src:url,w,h}; } w=Math.round(w*.8); h=Math.round(h*.8); }
+  throw new Error('圖片太大，無法壓到 150 KB'); }
+async function setImageFromBlob(id,blob){ try{ const img=await shrinkImage(blob); mutate(r=>{ const x=find(r,id); if(x) x.n.img=img; }); S.imgErr=''; panelRefresh(); toast(`已加入圖片（${Math.round(img.src.length*3/4/1024)} KB）`,['復原','undo']); }catch(e){ S.imgErr=e.message; panelRefresh(); toast(e.message); } }
+function openIcons(){ const f=selInfo(); if(!f) return toast('先選一個節點'); openDialog({type:'emoji',nodeId:f.n.id,nodeT:f.n.t,cat:V.emojiCatOf(f.n.icon),q:'',focus:'#emgrid .emb[tabindex="0"]'}); }
 // ---------- node search (v1.3) ----------
 const norm=t=>String(t||'').normalize('NFKC').toLowerCase();
 function findHits(){ const F=S.find, q=F&&norm(F.q.trim()); if(!q) return []; const doc=S.preview?S.preview.doc:S.doc; return allDeep(doc.root).filter(n=>norm(n.t).includes(q)||norm(n.note).includes(q)).map(n=>n.id); }
@@ -129,6 +170,9 @@ function openFind(){ if(S.view!=='editor'||!S.doc) return; if(S.editing) commitE
   const q=$('#findq'); if(q){ q.focus(); q.select(); } }
 function closeFind(){ if(!S.find) return; S.find=null; $('#findbar')?.remove(); $$('[data-act="find"]').forEach(b=>b.setAttribute('aria-pressed','false')); drawMap(); $('#cv')?.focus({preventScroll:true}); }
 function updateFindCount(){ const c=$('#findcount'); if(c) c.textContent=V.findCount(S.find); }
+// mobile: keep the node visible in the strip between the top bar and the details sheet
+function revealAboveSheet(id){ const n=lay&&lay.by.get(id), st=$('#stage'), sh=$('#panelHost .sheet'); if(n&&st&&!sh){ const ap=$('#panelHost .stylep'); if(!ap) return; const {sc}=S.vp, right=ap.getBoundingClientRect().left-st.getBoundingClientRect().left-24, x1=S.vp.tx+(n.x+n.w/2+40)*sc; if(x1>right){ S.vp={...S.vp,tx:S.vp.tx-(x1-right)}; drawMap(); } return; } if(!n||!st||!sh) return; const r=st.getBoundingClientRect(), top=70, bot=sh.getBoundingClientRect().top-r.top-8; if(bot-top<40) return; const {sc}=S.vp; const cy=S.vp.ty+n.y*sc, cx=S.vp.tx+n.x*sc;
+  if(cy>top+n.h*sc/2&&cy<bot-n.h*sc/2&&cx-n.w*sc/2>0&&cx+n.w*sc/2<st.clientWidth) return; S.vp={sc,tx:st.clientWidth/2-n.x*sc,ty:n.h*sc>bot-top-16?top+8-(n.y-n.h/2)*sc:(top+bot)/2-n.y*sc}; drawMap(); }
 function centerOn(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) return; const sc=S.vp.sc, top=isM()?70:56; S.vp={sc,tx:st.clientWidth/2-n.x*sc,ty:top+(st.clientHeight-top)/2-n.y*sc}; drawMap(); }
 function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits.length){ updateFindCount(); drawMap(); return; } F.i=((i%F.hits.length)+F.hits.length)%F.hits.length; const id=F.hits[F.i];
   if(!S.preview){ let p=find(S.doc.root,id), opened=false; while(p&&p.parent){ if(p.parent.collapsed){ delete p.parent.collapsed; opened=true; } p=find(S.doc.root,p.parent.id); } if(opened) touch(); S.sel=id; }
@@ -180,6 +224,14 @@ function showGhost(x,y,d){ let g=$('#ghost'); const n=lay.by.get(d.id); if(!g){g
 function hideGhost(){ $('#ghost')?.remove(); }
 // ---------- keyboard ----------
 function navigate(key){ const f=selInfo(); if(!f) return select(S.doc.root.id); const n=lay.by.get(f.n.id);
+  const mode=lay.r.layout;
+  if(mode==='org'){ // spatial: nearest visible node in that direction
+    const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[key]; if(key==='ArrowDown'&&f.n.collapsed) toggleCollapse(f.n.id);
+    const best=[...lay.by.values()].filter(m=>m!==n&&m.x!==undefined&&((m.x-n.x)*dir[0]+(m.y-n.y)*dir[1])>4).map(m=>{ const dx=m.x-n.x, dy=m.y-n.y, along=dx*dir[0]+dy*dir[1], across=Math.abs(dx*dir[1])+Math.abs(dy*dir[0]); return [along+across*3,m]; }).sort((a,b)=>a[0]-b[0])[0];
+    if(best) select(best[1].id); return; }
+  if(mode==='balanced'&&(key==='ArrowLeft'||key==='ArrowRight')){ const toChild=n.d===0||(n.side===-1)===(key==='ArrowLeft');
+    if(!toChild&&f.parent) return select(f.parent.id);
+    if(toChild){ if(f.n.collapsed) toggleCollapse(f.n.id); const k=kids(n).filter(c=>n.d>0||(key==='ArrowLeft'?c.side===-1:c.side!==-1)); if(k.length){ const near=[...k].sort((a,b)=>Math.abs(a.y-n.y)-Math.abs(b.y-n.y))[0]; return select(near.id);} } return; }
   if(key==='ArrowLeft'&&f.parent) return select(f.parent.id);
   if(key==='ArrowRight'){ if(f.n.collapsed) toggleCollapse(f.n.id); const k=kids(n); if(k.length){ const near=[...k].sort((a,b)=>Math.abs(a.y-n.y)-Math.abs(b.y-n.y))[0]; return select(near.id);} return; }
   if(key==='ArrowUp'||key==='ArrowDown'){ // visual neighbour in the same column first, else sibling
@@ -203,9 +255,16 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
     e.preventDefault(); startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta){ta.value=k;ta.setSelectionRange(1,1);} } }
 document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'), c=e.ctrlKey||e.metaKey;
   if(e.key==='Escape'&&closeMenu(true)) { e.preventDefault(); return; }
+  if(S.dialog&&t.classList&&t.classList.contains('emb')&&t.closest('#emgrid')&&/^Arrow/.test(e.key)){ e.preventDefault(); const bs=[...$$('#emgrid .emb')], i=bs.indexOf(t), top=bs[0].offsetTop, cols=Math.max(1,bs.filter(b=>b.offsetTop===top).length); const j={ArrowLeft:i-1,ArrowRight:i+1,ArrowUp:i-cols,ArrowDown:i+cols}[e.key]; const nb=bs[Math.max(0,Math.min(bs.length-1,j))]; bs.forEach(b=>b.tabIndex=-1); nb.tabIndex=0; nb.focus(); return; }
+  if(S.dialog&&t.id==='em-q'&&e.key==='ArrowDown'){ e.preventDefault(); $('#emgrid .emb')?.focus(); return; }
+  if(S.dialog&&t.id==='em-q'&&e.key==='Enter'){ e.preventDefault(); $('#emgrid .emb')?.click(); return; }
   if(S.dialog){ if(e.key==='Escape'){ e.preventDefault(); closeDialog(); } else if(e.key==='Tab') trapFocus(e); return; }
   if(c&&e.key.toLowerCase()==='s'){ e.preventDefault(); if(remote()) pushNow(); else toast('已存在這個瀏覽器'+(secrets.pat()?'（目前設定：只存瀏覽器）':'')); return; }
   if(e.altKey&&e.key==='0'){ e.preventDefault(); $('#cv')?.focus(); return; }
+  if(t.classList&&t.classList.contains('olin')&&olKey(e,t)) return;
+  if(t.id==='tagin'&&(e.key==='Enter'||e.key===','||e.key==='，')&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); addTag(t.value); return; }
+  if(t.id==='linkin'&&e.key==='Enter'&&!e.isComposing){ e.preventDefault(); act('linkSave'); return; }
+  if(t.id==='imgurl'&&e.key==='Enter'&&!e.isComposing){ e.preventDefault(); act('imgUrl'); return; }
   if(t.id==='findq'){ if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229){ e.preventDefault(); goFind(S.find.i+(e.shiftKey?-1:1)); return; } if(e.key==='Escape'){ e.preventDefault(); closeFind(); return; } }
   if(S.view==='editor'&&S.doc&&!S.editing){ if(c&&!e.altKey&&e.key.toLowerCase()==='f'){ e.preventDefault(); openFind(); return; }
     if(e.key==='F3'||(c&&e.key.toLowerCase()==='g')){ e.preventDefault(); if(!S.find) return openFind(); goFind(S.find.i+(e.shiftKey?-1:1)); return; } }
@@ -254,7 +313,7 @@ let lastFocus=null;
 function openDialog(D){ $('#toast')?.classList.remove('on'); if(!S.dialog) lastFocus=document.activeElement; S.dialog=D; drawDialog(true); }
 function closeDialog(){ if(!S.dialog) return; if(S.dialog.type==='ai'&&S.dialog.ctrl) S.dialog.ctrl.abort(); const D=S.dialog; S.dialog=null; drawDialog(); if(D.onClose) D.onClose(); if(lastFocus&&document.contains(lastFocus)) lastFocus.focus(); }
 function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove(); const D=S.dialog; if(!D) return; let html='';
-  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,D.tab==='expand'&&S.doc?(selInfo()||{n:S.doc.root}).n:null); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); }
+  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,D.tab==='expand'&&S.doc?(selInfo()||{n:S.doc.root}).n:null); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); } else if(D.type==='emoji'){ const n=S.doc&&find(S.doc.root,D.nodeId); html=V.emojiDialog(D,n&&n.n.icon,(prefs.get().recentIcons||[]).slice(0,12)); }
   const w=document.createElement('div'); w.className='dlg'; w.innerHTML=html; L.appendChild(w);
   if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
 function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
@@ -393,6 +452,7 @@ function copyPayload(p,msg){ const ta=pastebin(); CLIP={...p,msg}; ta.value=p.md
 function clipKey(k){ const g=selInfo(); if(!g&&k!=='v') return; const ta=pastebin();
   if(k==='v'){ ta.value=''; ta.focus({preventScroll:true}); setTimeout(refocusCanvas,50); return; }
   const p=clipPayload(g.n,!g.parent); CLIP={...p,msg:k==='x'?`已剪下「${g.n.t}」`:copyMsg(g.n),cut:k==='x'?g.n.id:null}; ta.value=p.md; ta.focus({preventScroll:true}); ta.select(); setTimeout(()=>{ CLIP=null; refocusCanvas(); },50); }
+document.addEventListener('focusin',e=>{ const t=e.target; if(t.classList&&t.classList.contains('olin')){ S.olId=t.dataset.olid; $$('.olr.cur').forEach(r=>r.classList.remove('cur')); t.closest('.olr')?.classList.add('cur'); } });
 document.addEventListener('copy',onCopy); document.addEventListener('cut',onCopy);
 function onCopy(e){ let p=CLIP; const t=e.target;
   if(!p){ if(S.view!=='editor'||!S.doc||S.editing||S.dialog||(MENU&&MENU.el)) return; if(t&&t.matches&&t.matches('input,textarea,select,[contenteditable],[contenteditable] *')) return;
@@ -404,6 +464,7 @@ document.addEventListener('paste',e=>{ const t=e.target, dt=e.clipboardData; if(
     if(/\S\s*\n\s*\S/.test(txt)||html.includes('data-mymind')){ S.pasteEdit={id:S.editing.id,before:t.value,txt,html}; setTimeout(()=>toast('貼上了多行文字，要轉成節點嗎？',['轉成節點','pasteEditNodes']),0); } return; }
   if(t&&t.id!=='pastebin'&&t.matches&&t.matches('input,textarea,select,[contenteditable],[contenteditable] *')) return;
   if(S.dialog||(MENU&&MENU.el)) return;
+  const file=[...(dt.files||[])].find(f=>/^image\//.test(f.type)); if(file&&S.view==='editor'&&S.doc){ e.preventDefault(); setTimeout(refocusCanvas,0); const g=selInfo(); if(!g) return toast('先選一個節點再貼上圖片'); setImageFromBlob(g.n.id,file); return; }
   if(S.view==='editor'&&S.doc){ e.preventDefault(); setTimeout(refocusCanvas,0); let nodes=IO.fromClipboardHTML(html); if(!nodes){ if(!txt.trim()) return toast('剪貼簿裡沒有文字可以貼上'); try{ nodes=IO.nodesFromMarkdown(txt); }catch{ nodes=[]; } } if(!nodes.length) return toast('剪貼簿裡沒有文字可以貼上');
     pasteNodes((selInfo()||{n:S.doc.root}).n.id,nodes); }
   else if(S.view==='list'&&txt.trim()){ e.preventDefault(); openMd({md:txt,target:'new'}); } });
@@ -412,7 +473,8 @@ function pasteNodes(id,nodes,{replace=false}={}){ nodes=nodes.map(n=>ensureIds(s
   toast(`已貼上 ${cnt} 個節點`,['復原','undo']); }
 function openMd(o){ const g=S.view==='editor'&&S.doc?(selInfo()||{n:S.doc.root}):null;
   openDialog({type:'md',md:'',nodeId:g&&g.n.id,nodeT:g&&g.n.t,target:g?'node':'new',focus:'#md-in',...o}); }
-function mdModel(D){ let nodes=[]; try{ nodes=(D.md||'').trim()?IO.parseMarkdown(D.md):[]; }catch{} const count=countNodes(nodes); let tree=null;
+const mdOpt=D=>({links:D.linkNote?'note':'field'});
+function mdModel(D){ let nodes=[]; try{ nodes=(D.md||'').trim()?IO.parseMarkdown(D.md,mdOpt(D)):[]; }catch{} const count=countNodes(nodes); let tree=null;
   if(D.target==='node') tree={t:D.nodeT,tgt:true,c:nodes}; else if(nodes.length) tree=nodes.length===1?nodes[0]:{...nodes[0],c:[...(nodes[0].c||[]),...nodes.slice(1)]};
   return {tree,count}; }
 function updateMdPreview(){ const D=S.dialog, m=mdModel(D); const pv=$('#md-prev'); if(pv) pv.innerHTML=V.mdPreview(m.tree,m.count); const c=$('#md-count'); if(c) c.textContent=`預覽 · 共 ${m.count} 個節點`; const b=$('#md-ok'); if(b){ b.textContent=V.mdOkLabel(D,m.count); b.disabled=!m.count; } }
@@ -460,16 +522,32 @@ async function act(a,v,el){ const f=selInfo();
   case 'collapse': closeMenu(); toggleCollapse(); break;
   case 'copyNode': { closeMenu(); if(!f||!f.parent) return toast('中心主題不能複製'); const cp=ensureIds(JSON.parse(JSON.stringify(f.n).replace(/"id":"[^"]+",?/g,''))); mutate(r=>{find(r,f.parent.id).n.c.splice(f.idx+1,0,cp);},{select:cp.id}); break; }
   case 'priMenu': closeMenu(); openPriMenu(); break;
-  case 'icons': closeMenu(); S.panel='style'; S.tab='node'; render(); setTimeout(()=>$('#icongrid button')?.focus(),30); break;
-  case 'note': closeMenu(); if(!S.doc) return; if(!f) return toast('先選一個節點'); S.panel=S.panel==='note'?'':'note'; render(); if(S.panel) setTimeout(()=>$('#notearea')?.focus(),30); break;
+  case 'icons': closeMenu(); openIcons(); break;
+  case 'emojiCat': if(S.dialog){ S.dialog.cat=v; drawDialog(); $(`#layer [data-act="emojiCat"][data-v="${v}"]`)?.focus(); } break;
+  case 'emojiSet': { const D=S.dialog; if(!D||D.type!=='emoji') return; closeDialog(); const id=D.nodeId; if(!find(S.doc.root,id)) return; mutate(r=>{ const x=find(r,id).n; if(v) x.icon=v; else delete x.icon; }); if(v) prefs.set({recentIcons:[v,...(prefs.get().recentIcons||[]).filter(e=>e!==v)].slice(0,16)}); break; }
+  case 'olToggle': S.olFocus={id:v}; toggleCollapse(v); break;
+  case 'olNote': S.sel=v; S.panel='note'; render(); setTimeout(()=>$('#notearea')?.focus(),30); break;
+  case 'olIndent': olOp('indent'); break; case 'olOutdent': olOp('outdent'); break; case 'olUp': olOp('up'); break; case 'olDown': olOp('down'); break; case 'olAdd': olOp('add'); break; case 'olDel': olOp('del'); break;
+  case 'linkSave': { const raw=$('#linkin')?.value; const u=normLink(raw); if(u===null){ S.linkErr='請輸入 http 或 https 開頭的網址'; panelRefresh(); $('#linkin')?.focus(); return; } S.linkErr=''; setField('link',u||''); panelRefresh(); if(u) toast('已加入連結'); break; }
+  case 'linkDel': S.linkErr=''; setField('link',''); panelRefresh(); break;
+  case 'linkFromNote': { if(!f) return; const m=/連結：(https?:\/\/\S+)/.exec(f.n.note||''); if(!m) return; mutate(r=>{ const x=find(r,f.n.id).n; x.link=m[1]; const rest=x.note.replace(m[0],'').replace(/\n{2,}/g,'\n').trim(); if(rest) x.note=rest; else delete x.note; }); panelRefresh(); toast('已設成節點連結'); break; }
+  case 'tagAdd': addTag($('#tagin')?.value); break;
+  case 'tagAddV': addTag(v); break;
+  case 'tagDel': if(!f) return; mutate(r=>{ const x=find(r,f.n.id).n; const t=tagsOfN(x).filter(k=>k!==v); delete x.tag; if(t.length) x.tags=t; else delete x.tags; }); panelRefresh(); break;
+  case 'color': if(!f) return; if(!f.parent) return toast('中心主題使用主題顏色'); mutate(r=>{ const x=find(r,f.n.id).n; if(v==='') delete x.color; else x.color=+v; }); panelRefresh(); break;
+  case 'imgPick': { if(!f) return; const id=f.n.id, inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=()=>{ const file=inp.files[0]; if(file) setImageFromBlob(id,file); }; inp.click(); break; }
+  case 'imgUrl': { if(!f) return; const u=normLink($('#imgurl')?.value); if(!u){ S.imgErr='請輸入 https 開頭的圖片網址'; panelRefresh(); return; } const id=f.n.id; const im=new Image(); im.onload=()=>{ mutate(r=>{ find(r,id).n.img={src:u,w:im.naturalWidth,h:im.naturalHeight}; }); S.imgErr=''; panelRefresh(); toast('已加入圖片（外部網址）'); }; im.onerror=()=>{ S.imgErr='讀不到這張圖片，請確認網址是圖片檔'; panelRefresh(); }; im.src=u; break; }
+  case 'imgDel': setField('img',''); S.imgErr=''; panelRefresh(); break;
+  case 'note': closeMenu(); if(!S.doc) return; if(!f) return toast('先選一個節點'); S.panel=S.panel==='note'?'':'note'; render(); if(S.panel){ setTimeout(()=>revealAboveSheet(S.sel),isM()?320:20); if(!isM()) setTimeout(()=>$('#notearea')?.focus(),30); } break;
   case 'deleteNote': setField('note',''); S.panel=''; render(); break;
-  case 'style': closeMenu(); S.panel=S.panel==='style'?'':'style'; render(); if(S.panel) setTimeout(()=>$('#panelHost [role=tab][aria-selected=true]')?.focus(),30); break;
+  case 'style': closeMenu(); S.panel=S.panel==='style'?'':'style'; render(); if(S.panel&&S.doc&&isM()) setTimeout(()=>revealAboveSheet(S.sel||S.doc.root.id),320); if(S.panel) setTimeout(()=>$('#panelHost [role=tab][aria-selected=true]')?.focus(),30); break;
   case 'history': closeMenu(); S.panel=S.panel==='history'?'':'history'; S.preview=null; render(); if(S.panel) loadHistory(); break;
   case 'closePanel': closePanel(); break;
   case 'tab': S.tab=v; drawPanel(); $(`#st-${v}`)?.focus(); break;
   case 'theme': S.doc.theme=v; touch(); render(); break;
   case 'randomTheme': { const ks=Object.keys(THEMES).filter(k=>k!==S.doc.theme); S.doc.theme=ks[Math.floor(Math.random()*ks.length)]; touch(); render(); toast('主題：'+THEMES[S.doc.theme].name,['復原','undoTheme']); S.prevTheme=S.prevTheme; break; }
   case 'edge': case 'lw': case 'spacing': S.doc.settings={...(S.doc.settings||{}),[a]:v}; touch(); break;
+  case 'layout': S.doc.settings={...(S.doc.settings||{}),layout:v}; S.vp=null; S.vpFor=null; touch(); drawAll(true); setTimeout(()=>$(`#panelHost [data-act="layout"][data-v="${v}"]`)?.focus(),20); break;
   case 'rootTop': S.doc.settings={...(S.doc.settings||{}),rootTop:v==='1'}; S.vpFor=null; touch(); drawMap(true); break;
   case 'minimap': S.minimap=!S.minimap; prefs.set({minimap:S.minimap}); render(); break;
   case 'hints': S.hints=!S.hints; prefs.set({hints:S.hints}); render(); break;
@@ -480,7 +558,7 @@ async function act(a,v,el){ const f=selInfo();
   case 'level': closeMenu(); setLevel(+v); break;
   case 'zoomIn': zoomAt(1.2); updMenuPct(); break; case 'zoomOut': zoomAt(1/1.2); updMenuPct(); break;
   case 'fit': closeMenu(); fit(); break;
-  case 'outline': closeMenu(); S.outline=!S.outline; render(); break;
+  case 'outline': closeMenu(); if(S.outline&&S.olId&&S.doc&&find(S.doc.root,S.olId)) S.sel=S.olId; S.outline=!S.outline; if(S.outline&&S.find) closeFind(); render(); if(S.outline) setTimeout(()=>olFocus(S.sel||S.doc.root.id),30); else { ensureVisible(S.sel); $('#cv')?.focus(); } break;
   case 'olSelect': S.outline=false; S.sel=v; render(); ensureVisible(v); $('#cv').focus(); break;
   case 'shortcuts': closeMenu(); openDialog({type:'shortcuts'}); break;
   case 'moreMenu': openMoreMenu(el); break;
@@ -501,9 +579,9 @@ async function act(a,v,el){ const f=selInfo();
   case 'mdTarget': if(S.dialog){ S.dialog.target=v; drawDialog(); $('#layer .dlg [data-act="mdTarget"][aria-checked="true"]')?.focus(); } break;
   case 'mdPick': pickFile((text,name)=>{ if(S.dialog&&S.dialog.type==='md'){ S.dialog.md=text; drawDialog(); $('#md-in')?.focus(); } }); break;
   case 'mdClip': { const D=S.dialog; try{ const t=await navigator.clipboard.readText(); if(D&&S.dialog===D){ D.md=t; drawDialog(); $('#md-in')?.focus(); } }catch{ toast('瀏覽器不允許直接讀取剪貼簿，請在框內按 Ctrl+V（手機長按）貼上'); $('#md-in')?.focus(); } break; }
-  case 'mdOk': { const D=S.dialog; if(!D||D.type!=='md'||!(D.md||'').trim()) return; let nodes; try{ nodes=IO.nodesFromMarkdown(D.md); }catch(e){ return toast('看不懂這段 Markdown：'+e.message); }
+  case 'mdOk': { const D=S.dialog; if(!D||D.type!=='md'||!(D.md||'').trim()) return; let nodes; try{ nodes=IO.nodesFromMarkdown(D.md,mdOpt(D)); }catch(e){ return toast('看不懂這段 Markdown：'+e.message); }
     if(!nodes.length) return; if(D.target==='node'&&S.doc&&find(S.doc.root,D.nodeId)){ closeDialog(); pasteNodes(D.nodeId,nodes); }
-    else { closeDialog(); const root=IO.fromMarkdown(D.md); createMap(root); toast(`已建立「${root.t}」，共 ${allDeep(root).length} 個節點`); } break; }
+    else { closeDialog(); const root=IO.fromMarkdown(D.md,mdOpt(D)); createMap(root); toast(`已建立「${root.t}」，共 ${allDeep(root).length} 個節點`); } break; }
   case 'pasteEditNodes': { const P=S.pasteEdit; S.pasteEdit=null; $('#toast')?.classList.remove('on'); if(!P||!S.doc) return; const nodes=IO.fromClipboardHTML(P.html)||IO.nodesFromMarkdown(P.txt); if(!nodes.length) return;
     if(S.editing&&S.editing.id===P.id){ const ta=$('#ovl .editbox'); if(ta) ta.value=P.before.trim()?P.before:' '; commitEdit(); }
     const g=find(S.doc.root,P.id); if(!g) return; pasteNodes(P.id,nodes,{replace:!P.before.trim()&&!!g.parent}); break; }
@@ -544,10 +622,12 @@ document.addEventListener('click',e=>{ if($('.navdrawer')&&e.target.closest('.na
 document.addEventListener('input',e=>{ const t=e.target; const k=t.dataset.input;
   if(k==='q'){ S.q=t.value; const pos=t.selectionStart; render(); const n=$('#homeq'); if(n){n.focus();n.setSelectionRange(pos,pos);} }
   else if(k==='sideQ'){ S.sideQ=t.value; const pos=t.selectionStart; const inDrawer=!!t.closest('.navdrawer'); const host=inDrawer?$('.navdrawer .side'):$('#side'); host.innerHTML=V.sidebar(S,maps.index()); const n=host.querySelector('#sideq'); n.focus(); n.setSelectionRange(pos,pos); }
+  else if(t.classList.contains('olin')){ const id=t.dataset.olid, x=S.doc&&find(S.doc.root,id); if(!x||S.preview) return; if(t._snapFor!==id){ S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>100) S.undo.shift(); S.redo=[]; t._snapFor=id; } x.n.t=t.value; clearTimeout(olT); olT=setTimeout(quietSave,400); }
+  else if(k==='emojiQ'&&S.dialog){ S.dialog.q=t.value; const g=$('#emgrid'); if(g) g.innerHTML=V.emojiGrid(V.emojiList(S.dialog),(find(S.doc.root,S.dialog.nodeId)||{n:{}}).n.icon); $('#layer .emcats')?.toggleAttribute('hidden',!!t.value.trim()); $('#layer .emrow')?.toggleAttribute('hidden',!!t.value.trim()); }
   else if(k==='find'&&S.find){ S.find.q=t.value; S.find.i=0; goFind(0); }
   else if(k==='mdText'&&S.dialog&&S.dialog.type==='md'){ S.dialog.md=t.value; updateMdPreview(); }
   else if(k==='note'){ clearTimeout(t._t); t._t=setTimeout(()=>{ const f=selInfo(); if(!f) return; const v=t.value; mutate(r=>{const x=find(r,f.n.id).n; if(v.trim()) x.note=v; else delete x.note;}); },400); } });
-document.addEventListener('change',e=>{ const t=e.target; if(t.dataset.input==='sort'){ S.sort=t.value; render(); } if(t.dataset.ai&&S.dialog) S.dialog[t.dataset.ai]=t.value; });
+document.addEventListener('change',e=>{ const t=e.target; if(t.dataset.input==='sort'){ S.sort=t.value; render(); } if(t.dataset.ai&&S.dialog) S.dialog[t.dataset.ai]=t.value; if(t.dataset.md==='linkNote'&&S.dialog){ S.dialog.linkNote=!t.checked; updateMdPreview(); } });
 document.addEventListener('keydown',e=>{ // roving tabindex for tablists
   const t=e.target; if(t.getAttribute&&t.getAttribute('role')==='tab'&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){ const tabs=[...t.closest('[role=tablist]').querySelectorAll('[role=tab]')]; let i=tabs.indexOf(t); i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length; e.preventDefault(); e.stopPropagation(); tabs[i].click(); }
   if(t.matches&&t.matches('.hist li[role=button]')&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); t.click(); } },true);

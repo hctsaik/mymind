@@ -13,15 +13,21 @@ export function stripInline(t){ const links=[];
   return {t,links}; }
 // Markdown → list of top-level nodes (no ids). Headings, - * + 1. 1) lists, [ ]/[x] tasks, indented plain lines,
 // "> " quotes (become the previous node's note), fenced code (kept as plain lines), --- rules and blank lines ignored.
-export function parseMarkdown(md){
+export function parseMarkdown(md,{links:linkMode='field'}={}){
   const src=String(md||'').replace(/\r\n?/g,'\n').replace(/^\uFEFF/,'').split('\n');
   const tops=[]; const stack=[]; // {lv,n}
   let head=-1, listInd=[], inFence=false, last=null;
   const push=(lv,n)=>{ while(stack.length&&stack[stack.length-1].lv>=lv) stack.pop(); (stack.length?(stack[stack.length-1].n.c=stack[stack.length-1].n.c||[]):tops).push(n); stack.push({lv,n}); last=n; };
-  const mk=(raw,extra={})=>{ const {t,links}=stripInline(raw.replace(/^\\(?=#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,'')); const n={t:t||'（空白）',...extra}; if(links.length) n.note=links.map(u=>'連結：'+u).join('\n'); return n; };
+  const mk=(raw,extra={})=>{ raw=raw.replace(/^\\(?=#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,''); const n0={}; const litEm=/^\\\p{Extended_Pictographic}/u.test(raw); if(litEm) raw=raw.slice(1);
+    const em=!litEm&&raw.match(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}\uFE0F?)*)\s+(\S.*)$/u); if(em){ n0.icon=em[1]; raw=em[2]; }
+    const tags=[]; let tm; while((tm=raw.match(/\s#([\p{L}\p{N}_\-\/]{1,24})\s*$/u))&&!/^\d+$/.test(tm[1])){ tags.unshift(tm[1]); raw=raw.slice(0,tm.index); } if(tags.length) n0.tags=tags;
+    const {t,links}=stripInline(raw); const n={t:t||'（空白）',...n0,...extra};
+    if(links.length){ const http=links.filter(u=>/^https?:\/\//i.test(u)); if(linkMode==='field'&&http.length){ n.link=http[0]; const rest=links.filter(u=>u!==http[0]); if(rest.length) n.note=rest.map(u=>'連結：'+u).join('\n'); } else n.note=links.map(u=>'連結：'+u).join('\n'); }
+    return n; };
   for(const line0 of src){ const line=line0.replace(/\t/g,'    ');
     if(/^\s*(```|~~~)/.test(line)){ inFence=!inFence; continue; }
     if(!line.trim()) continue;
+    { const im=!inFence&&line.trim().match(/^!\[([^\]]*)\]\((https?:\/\/[^)\s]+|data:image\/[^)\s]+)\)$/); if(im&&last&&!last.img){ last.img={src:im[2],...(im[1]?{alt:im[1]}:{})}; continue; } }
     if(!inFence&&/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) continue; // horizontal rule
     let m;
     if(!inFence&&(m=line.match(/^\s*>\s?(.*)$/))){ if(last){ const q=stripInline(m[1]).t; if(q) last.note=(last.note?last.note+'\n':'')+q; } else push(head+1,mk(m[1])); continue; }
@@ -35,19 +41,24 @@ export function parseMarkdown(md){
   return tops; }
 const withIdsDeep=n=>({...n,id:newId(),...(n.c&&n.c.length?{c:n.c.map(withIdsDeep)}:{})});
 // Markdown → a whole map: root = the single top item, or the first H1 / first line with everything else under it.
-export function fromMarkdown(md,fallback='匯入的大綱'){ const tops=parseMarkdown(md); if(!tops.length) throw new Error('沒有內容');
+export function fromMarkdown(md,o){ const tops=parseMarkdown(md,o); if(!tops.length) throw new Error('沒有內容');
   let root; if(tops.length===1) root=tops[0];
   else { root={...tops[0],c:[...(tops[0].c||[]),...tops.slice(1)]}; }
   return withIdsDeep(root); }
 // Markdown → nodes to insert under a node: one top item = one child subtree; many = siblings.
-export const nodesFromMarkdown=md=>parseMarkdown(md).map(withIdsDeep);
+export const nodesFromMarkdown=(md,o)=>parseMarkdown(md,o).map(withIdsDeep);
 const escInline=t=>stripInline(t).t===t?t:t.replace(/[\\`*_\[\]~<>]/g,'\\$&');
-const escLine=t=>escInline(String(t||'').replace(/\s+/g,' ').trim()).replace(/^(\s*)(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,'$1\\$2');
+const escLine=t=>escInline(String(t||'').replace(/\s+/g,' ').trim()).replace(/(\s)#(?=[\p{L}\p{N}_\-\/]{1,24}\s*$)/u,'$1\\#').replace(/^(\p{Extended_Pictographic})/u,'\\$1').replace(/^(\s*)(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\[[ xX]\]\s)/,'$1\\$2');
 const noteLines=(note,ind)=>String(note).split('\n').filter(x=>x.trim()).map(x=>`${ind}> ${x.trim()}`);
+const tagsOfN=n=>Array.isArray(n.tags)?n.tags:(n.tag?[n.tag]:[]);
+// one node → its Markdown line: "icon [text](link) #tag #tag"
+function lineOf(n){ const txt=escLine(n.t); const body=n.link?`[${txt.replace(/\]/g,'\\]')}](${String(n.link).replace(/[()\s]/g,c=>encodeURIComponent(c))})`:txt; return `${n.icon?n.icon+' ':''}${body}${tagsOfN(n).map(t=>' #'+t).join('')}`; }
+// image (web address only; images pasted into the map are too big for Markdown) + note lines under a node
+let OUT=null; function extras(n,ind){ if(n.img&&/^https?:/i.test(n.img.src)) OUT.push(`${ind}![${(n.img.alt||'').replace(/[\[\]]/g,'')}](${n.img.src})`); if(n.note) OUT.push(...noteLines(n.note,ind)); }
 // Map/subtree → Markdown. Root: "# title"; descendants: nested "- " lists (2 spaces), done → "- [x]", notes → "> " lines.
-export function toMarkdown(node,{asRoot=true}={}){ const out=[];
-  const item=(c,lv)=>{ out.push(`${'  '.repeat(lv)}- ${c.done?'[x] ':''}${escLine(c.t)}`); if(c.note) out.push(...noteLines(c.note,'  '.repeat(lv+1))); (c.c||[]).forEach(k=>item(k,lv+1)); };
-  if(asRoot){ out.push(`# ${escLine(node.t)}`); if(node.note) out.push(...noteLines(node.note,'')); out.push(''); (node.c||[]).forEach(c=>item(c,0)); }
+export function toMarkdown(node,{asRoot=true}={}){ const out=[]; OUT=out;
+  const item=(c,lv)=>{ out.push(`${'  '.repeat(lv)}- ${c.done?'[x] ':''}${lineOf(c)}`); extras(c,'  '.repeat(lv+1)); (c.c||[]).forEach(k=>item(k,lv+1)); };
+  if(asRoot){ out.push(`# ${lineOf(node)}`); extras(node,''); out.push(''); (node.c||[]).forEach(c=>item(c,0)); }
   else item(node,0);
   return out.join('\n')+'\n'; }
 // Subtree → simple HTML list (for pasting into docs), carrying the exact MyMind JSON for lossless paste back.

@@ -1,6 +1,6 @@
 // HTML templates. Every function returns a string; app.js owns state and events (data-act attributes).
-import { I, esc, THEMES, DEFAULT_THEME, PRI } from './core.js';
-import { thumbSvg, themeThumb } from './mapview.js';
+import { I, esc, THEMES, DEFAULT_THEME, PRI, readable } from './core.js';
+import { thumbSvg, themeThumb, LAYOUTS, tagsOf, marks } from './mapview.js';
 import { VERSION } from './version.js';
 export const isMobile=()=>innerWidth<=768;
 const LOGO=`<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6" fill="#fff" stroke="none"/><path d="M8.6 12H11M11 6.5V17.5M11 6.5H19M11 12H19M11 17.5H19"/></svg>`;
@@ -35,7 +35,7 @@ export function savedChip(S){ const s=S.sync; let ic='cloud',l,sh;
   else {l='已同步到 GitHub'+(s.at?' · '+rel(s.at):'');sh='已同步';}
   return `<span class="saved ${s.state==='error'?'err':''}" role="status" aria-live="polite">${I(ic)}<span class="long">${esc(l)}</span><span class="short">${esc(sh)}</span></span>`;}
 export function topbar(S,doc,curNode){
-  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','備註','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
+  const tb=[['undo','復原','low','Ctrl+Z','undo'],['redo','重做','low','Ctrl+Y','redo'],'|low',['child','子主題','','Tab','addChild'],['sibling','同級','','Enter','addSibling'],['parent','升一層','low','Shift+Tab','outdent'],'|',['smile','圖示','','Alt+I','icons'],['note','詳情','','Ctrl+Alt+M','note'],'|',['search','搜尋','','Ctrl+F','find'],'|',['spark','AI 展開','ai','Ctrl+J','aiExpand'],['wand','換主題','low','F6','randomTheme'],['outline','大綱',S.outline?'on':'','Ctrl+O','outline'],['history','歷史',(S.panel==='history'?'on ':'')+'low','Shift+Alt+H','history']];
   return `<header class="top flt">
    <button class="icon-btn mobile-only rb backpill" data-act="home" aria-label="回到列表（目前節點：${esc(curNode)}）">${I('back')}<span class="cn">${esc(curNode)}</span></button>
    <div class="title"><h1 id="maptitle">${esc(doc.icon||'🧠')} ${esc(doc.root.t)}</h1>${savedChip(S)}</div>
@@ -59,14 +59,14 @@ export function editorShell(S,doc,curNode){ const th=THEMES[doc.theme]||THEMES[D
      <div class="zoom ${S.minimap&&!m?'mini-on':''}" data-dock="${S.minimap||m?'right':'bottom'}"><div class="minimap" aria-label="小地圖"><svg id="mmsvg" aria-hidden="true"></svg><div class="vp" id="mmvp"></div></div>
        <div class="zctl"><button class="icon-btn" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pct" id="pct">100%</span><button class="icon-btn" data-act="zoomIn" aria-label="放大">${I('plus')}</button><span class="zsep"></span><button class="icon-btn" data-act="fit" aria-label="符合畫面">${I('fit')}</button><button class="icon-btn mm-t" data-act="minimap" aria-pressed="${!!S.minimap}" aria-label="小地圖">${I('mini')}</button><button class="icon-btn kb" data-act="shortcuts" aria-label="鍵盤快捷鍵（?）">${I('kb')}</button></div></div>
      <div id="panelHost"></div>
-     ${m&&S.aibar?`<form class="aibar" data-dock="bottom" id="aibar" aria-label="AI 指令"><label class="sr" for="aiq">請輸入你的需求</label><input id="aiq" placeholder="請輸入你的需求" autocomplete="off" enterkeyhint="send"><button type="button" class="x" data-act="aibarClose" aria-label="收起 AI 指令列">${I('x')}</button><button type="submit" class="send" aria-label="送出" disabled>${I('up')}</button></form>`:''}
+     ${m&&S.aibar&&!S.outline?`<form class="aibar" data-dock="bottom" id="aibar" aria-label="AI 指令"><label class="sr" for="aiq">請輸入你的需求</label><input id="aiq" placeholder="請輸入你的需求" autocomplete="off" enterkeyhint="send"><button type="button" class="x" data-act="aibarClose" aria-label="收起 AI 指令列">${I('x')}</button><button type="submit" class="send" aria-label="送出" disabled>${I('up')}</button></form>`:''}
      </div>`;
 }
 let togN=0;
 const tog=(lbl,on,act)=>{const id='tg'+(togN++);return `<div class="row"><span id="${id}">${lbl}</span><button class="toggle" role="switch" data-act="${act}" aria-checked="${!!on}" aria-labelledby="${id}"><i></i></button></div>`};
 const seg=(label,act,opts,val)=>`<div class="row"><span id="sg-${act}">${label}</span><div class="seg" role="group" aria-labelledby="sg-${act}">${opts.map(([v,n])=>`<button data-act="${act}" data-v="${v}" aria-pressed="${String(val)===String(v)}">${n}</button>`).join('')}</div></div>`;
 export function stylePanel(S,doc,node){ const tab=S.tab, set=doc.settings||{}, th=THEMES[doc.theme]||THEMES[DEFAULT_THEME];
-  const tabs=[['theme','主題'],['node','節點'],['layout','線條'],['canvas','畫布']];
+  const tabs=[['theme','主題'],['node','節點'],['layout','版面'],['canvas','畫布']];
   const panels={
    theme:`<div class="plabel"><span>主題配色（整張圖）</span><button class="linkbtn" data-act="randomTheme">${I('wand')}隨機換一個<span class="desk-only">&nbsp;· F6</span></button></div>
     <div class="themes">${Object.keys(THEMES).map(k=>`<button class="theme" data-act="theme" data-v="${k}" aria-pressed="${k===doc.theme}">${themeThumb(THEMES[k])}<span>${THEMES[k].name}${k===DEFAULT_THEME?'（預設）':''}</span></button>`).join('')}</div>
@@ -79,23 +79,38 @@ export function stylePanel(S,doc,node){ const tab=S.tab, set=doc.settings||{}, t
     <div class="plabel"><span>圖示</span><span class="kbd desk-only">Alt+I</span></div>
     <div class="emoji-grid" id="icongrid">${'⭐️✅❗️❓💡📌🔥🎯📅🏨✈️💰🧳🍜📝👍❌⚡'.match(/\p{Extended_Pictographic}\uFE0F?/gu).map(e=>`<button data-act="icon" data-v="${e}" aria-label="圖示 ${e}" aria-pressed="${node.icon===e}">${e}</button>`).join('')}<button data-act="icon" data-v="" aria-label="移除圖示">∅</button></div>
     <div class="row" style="margin-top:12px"><button class="btn" data-act="note">${I('note')}${node.note?'編輯備註':'新增備註'}</button></div>`:`<p class="panel-note">先在地圖上點一個節點。</p>`,
-   layout:`<div class="plabel"><span>分支線條（整張圖）</span></div>
+   layout:`<div class="plabel"><span>版面配置（存在這張圖）</span></div>
+    <div class="layouts" role="radiogroup" aria-label="版面配置">${LAYOUTS.map(([k,n])=>`<button class="lyt" role="radio" data-act="layout" data-v="${k}" aria-checked="${(set.layout||'right')===k}">${layoutThumb(k)}<span>${n}</span></button>`).join('')}</div>
+    <button class="btn olbtn" data-act="outline">${I('outline')}切換到大綱（可編輯清單）<span class="kbd desk-only">Ctrl+O</span></button>
+    <div class="plabel"><span>分支線條（整張圖）</span></div>
     ${seg('連線樣式','edge',[['bracket','括號折線'],['curve','曲線'],['straight','直線']],set.edge||th.edge||'curve')}
     ${seg('線條粗細','lw',[['thin','細'],['standard','標準'],['thick','粗']],set.lw||'standard')}
     <div class="plabel"><span>間距</span></div>
-    ${seg('根節點位置','rootTop',[['0','置中'],['1','靠上']],set.rootTop??th.rootTop?1:0)}
+    ${(set.layout||'right')==='right'?seg('根節點位置','rootTop',[['0','置中'],['1','靠上']],set.rootTop??th.rootTop?1:0):''}
     ${seg('層與層','spacing',[['compact','緊湊'],['standard','標準'],['loose','寬鬆']],set.spacing||'standard')}
-    <p class="panel-note">v1 只提供「向右展開的邏輯圖」。左右心智圖、組織圖、樹狀圖列為未來功能。</p>`,
+    <p class="panel-note">${(set.layout||'right')==='org'?'組織圖使用固定的折線，連線樣式只影響其他版面。':'版面只改變排列方式，內容和順序不變；匯出 PNG／SVG／PDF 也會用這個版面。'}</p>`,
    canvas:`<div class="plabel"><span>畫布</span></div>${tog('顯示小地圖',S.minimap,'minimap')}${tog('快捷鍵提示',S.hints,'hints')}`};
   return `<section class="stylep" data-dock="${isMobile()?'bottom':'right'}" aria-label="樣式面板">
    ${isMobile()?'<div class="grab" aria-hidden="true"></div>':''}
    <div class="phead"><h3>樣式</h3><span class="kbd desk-only" style="margin-left:6px">Alt+Y</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉樣式面板">${I('x')}</button></div>
    <div class="tabs" role="tablist" aria-label="樣式分頁">${tabs.map(([k,n])=>`<button role="tab" id="st-${k}" data-act="tab" data-v="${k}" aria-selected="${k===tab}" aria-controls="sp-${k}" tabindex="${k===tab?0:-1}">${n}</button>`).join('')}</div>
    ${tabs.map(([k])=>`<div class="pbody" role="tabpanel" id="sp-${k}" aria-labelledby="st-${k}"${k===tab?'':' hidden'}>${k===tab?panels[k]:''}</div>`).join('')}</section>`;}
-export function notePanel(node){ const m=isMobile();
-  const body=`<label class="sr" for="notearea">備註內容</label><textarea class="ta" id="notearea" data-input="note" placeholder="寫下這個節點的細節…" style="min-height:${m?160:260}px">${esc(node.note||'')}</textarea><div class="acts"><button class="btn" data-act="deleteNote">${I('trash')}刪除備註</button><button class="btn primary" data-act="closePanel">完成</button></div>`;
-  return m?`<section class="sheet" data-dock="bottom" aria-label="備註"><div class="grab" aria-hidden="true"></div><h4>${I('note')}${esc(node.t)} · 備註<button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉">${I('x')}</button></h4><div class="body">${body}</div></section>`
-   :`<aside class="stylep notep" data-dock="right" aria-label="備註"><div class="phead"><h3>${I('note')}備註</h3><span class="kbd" style="margin-left:6px">Ctrl+Alt+M</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉備註">${I('x')}</button></div><div class="pbody"><div class="nfor">${esc(node.t)}</div>${body}</div></aside>`;}
+export function notePanel(node,S={}){ const m=isMobile(), th=THEMES[(S.doc&&S.doc.theme)||DEFAULT_THEME]||THEMES[DEFAULT_THEME], tg=tagsOf(node);
+  const allTags=[...new Set((S.allTags||[]).filter(t=>!tg.includes(t)))];
+  const noteLink=!node.link&&/連結：(https?:\/\/\S+)/.exec(node.note||'');
+  const sec=(id,icon,title,body,extra='')=>`<section class="nsec" aria-labelledby="ns-${id}"><h4 id="ns-${id}">${I(icon)}${title}${extra}</h4>${body}</section>`;
+  const note=sec('note','note','備註',`<label class="sr" for="notearea">備註內容</label><textarea class="ta" id="notearea" data-input="note" placeholder="寫下這個節點的細節…" style="min-height:${m?110:150}px">${esc(node.note||'')}</textarea>`,node.note?`<button class="linkbtn mini" data-act="deleteNote">清除</button>`:'');
+  const link=sec('link','link','連結',`${noteLink?`<div class="nhint">${I('info')}<span>備註裡有連結</span><button class="btn mini" data-act="linkFromNote">設成節點連結</button></div>`:''}
+    <div class="nrow"><label class="sr" for="linkin">連結網址</label><input class="inpt" id="linkin" type="url" inputmode="url" value="${esc(node.link||'')}" placeholder="https://…" autocomplete="off" spellcheck="false">${node.link?`<a class="btn icononly" href="${esc(node.link)}" target="_blank" rel="noopener noreferrer" aria-label="在新分頁開啟連結">${I('ext')}</a><button class="btn icononly" data-act="linkDel" aria-label="移除連結">${I('x')}</button>`:`<button class="btn" data-act="linkSave">加入</button>`}</div><p class="nerr" id="linkerr" aria-live="polite">${esc(S.linkErr||'')}</p>`);
+  const tags=sec('tags','tag','標籤',`<div class="chips" role="list">${tg.map(t=>`<span class="chip" role="listitem">#${esc(t)}<button data-act="tagDel" data-v="${esc(t)}" aria-label="移除標籤 ${esc(t)}">${I('x')}</button></span>`).join('')||'<span class="nnone">還沒有標籤</span>'}</div>
+    <div class="nrow"><label class="sr" for="tagin">新增標籤</label><input class="inpt" id="tagin" list="taglist" placeholder="新增標籤，按 Enter" autocomplete="off" enterkeyhint="done"><button class="btn" data-act="tagAdd">加入</button></div>
+    ${allTags.length?`<div class="tagsugg"><span>這張圖用過：</span>${allTags.slice(0,8).map(t=>`<button class="chip ghost" data-act="tagAddV" data-v="${esc(t)}">#${esc(t)}</button>`).join('')}</div>`:''}<datalist id="taglist">${allTags.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>`);
+  const colors=sec('color','palette','顏色',`<div class="cswatch" role="radiogroup" aria-label="節點顏色（子節點跟著變）"><button class="csw auto" role="radio" data-act="color" data-v="" aria-checked="${!Number.isInteger(node.color)}" aria-label="自動（跟分支）"><i></i><span>自動</span></button>${marks(th).map(([c,nm],k)=>`<button class="csw" role="radio" data-act="color" data-v="${k}" aria-checked="${node.color===k}" aria-label="${nm}" title="${nm}"><i style="background:${c};box-shadow:inset 0 0 0 1.5px ${readable(c,'#FFFFFF',3)}"></i></button>`).join('')}</div><p class="nsub">整個分支一起變色，配色跟著主題。</p>`);
+  const img=sec('img','image','圖片',node.img?`<figure class="nimg"><img src="${esc(node.img.src)}" alt="${esc(node.img.alt||node.t)}"><figcaption>${node.img.src.startsWith('data:')?`已嵌入 · ${Math.round(node.img.src.length*3/4/1024)} KB`:`外部圖片 · ${esc(new URL(node.img.src).hostname)}`}</figcaption></figure><div class="nrow"><button class="btn" data-act="imgPick">${I('upload')}替換</button><button class="btn" data-act="imgDel">${I('trash')}移除圖片</button></div>`
+    :`<div class="nrow"><button class="btn" data-act="imgPick">${I('upload')}上傳圖片</button><span class="nsub" style="margin:0">或選取節點後直接貼上（${m?'長按 › 貼上':'Ctrl+V'}）</span></div><div class="nrow"><label class="sr" for="imgurl">圖片網址</label><input class="inpt" id="imgurl" type="url" inputmode="url" placeholder="或貼上圖片網址 https://…" autocomplete="off"><button class="btn" data-act="imgUrl">加入</button></div><p class="nsub">上傳的圖片會自動縮小到 640px、150 KB 以內，存在這張圖裡。</p><p class="nerr" id="imgerr" aria-live="polite">${esc(S.imgErr||'')}</p>`);
+  const body=note+link+tags+colors+img;
+  return m?`<section class="sheet nsheet" data-dock="bottom" aria-label="節點詳情"><div class="grab" aria-hidden="true"></div><h4>${I('note')}<span class="ntitle">${esc(node.t)}</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉">${I('x')}</button></h4><div class="body">${body}</div></section>`
+   :`<aside class="stylep notep" data-dock="right" aria-label="節點詳情"><div class="phead"><h3>${I('note')}節點詳情</h3><span class="kbd" style="margin-left:6px">Ctrl+Alt+M</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉節點詳情">${I('x')}</button></div><div class="pbody"><div class="nfor">${node.icon?esc(node.icon)+' ':''}${esc(node.t)}</div>${body}</div></aside>`;}
 export function historyPanel(S){ const H=S.hist;
   return `<section class="stylep" data-dock="${isMobile()?'bottom':'right'}" aria-label="版本歷史">
    <div class="phead"><h3>版本歷史</h3><span class="kbd desk-only" style="margin-left:6px">Shift+Alt+H</span><button class="icon-btn" style="margin-left:auto" data-act="closePanel" aria-label="關閉">${I('x')}</button></div>
@@ -104,8 +119,18 @@ export function historyPanel(S){ const H=S.hist;
    ${!S.remote?`<p class="panel-note">目前「只存瀏覽器」，沒有版本歷史。到 設定 › 儲存與同步 打開 GitHub 同步後，每次同步都會留下一個版本。</p>`:H.loading?`<p class="panel-note" role="status">讀取中…</p>`:H.error?`<div class="alert err" role="alert">${I('alert')}<div>${esc(H.error)}</div></div>`:!H.items.length?`<p class="panel-note">這張圖還沒有同步到 GitHub。</p>`:
    `<ul class="hist">${H.items.map((i,k)=>`<li class="${S.preview&&S.preview.sha===i.sha?'on':''} ${k===0?'cur':''}" tabindex="0" role="button" data-act="preview" data-v="${i.sha}" aria-label="${esc(rel(i.date))} ${esc(i.msg)}"><b>${esc(rel(i.date))}${k===0?' · 目前版本':''}</b><div class="m">${esc(i.msg)}</div><div class="s"><code>${i.sha.slice(0,7)}</code><span>${esc(i.author||'')}</span></div></li>`).join('')}</ul>
    <a class="btn" style="width:100%;margin-top:10px" href="https://github.com/${esc(S.repo)}/commits/main/maps/${esc(S.mapId)}.json" target="_blank" rel="noopener">${I('ext')}在 GitHub 上看完整紀錄</a>`}</div></section>`;}
-export function outlineView(root){ const rows=[];(function w(n,lv){rows.push(`<button class="olrow" data-act="olSelect" data-v="${n.id}" style="padding-left:${lv*26}px;${lv===0?'font-weight:700;font-size:17px':lv===1?'font-weight:600':''}"><span class="b" aria-hidden="true"></span>${n.icon?esc(n.icon)+' ':''}${esc(n.t)}${n.note?' 📝':''}</button>`);(n.c||[]).forEach(c=>w(c,lv+1));})(root,0);
-  return `<div class="outline"><div class="doc"><h2>大綱</h2><div class="ol">${rows.join('')}</div></div></div>`;}
+export function outlineView(root,S={}){ const rows=[]; const m=isMobile(); let N=0;
+  (function w(n,lv){ N++; const k=n.c||[], has=k.length>0, tg=tagsOf(n);
+    rows.push(`<div class="olr${S.olId===n.id?' cur':''}${lv===0?' root':lv===1?' l1':''}" role="treeitem" aria-level="${lv+1}"${has?` aria-expanded="${!n.collapsed}"`:''} data-id="${n.id}" style="--lv:${lv}">
+      ${has&&lv>0?`<button class="oltog" data-act="olToggle" data-v="${n.id}" tabindex="-1" aria-label="${n.collapsed?'展開':'收合'}「${esc(n.t)}」">${I(n.collapsed?'chevR':'chevD')}</button>`:'<span class="oltog sp" aria-hidden="true"></span>'}
+      <span class="olb${n.collapsed&&has?' fold':''}" aria-hidden="true"></span>${n.icon?`<span class="olic" aria-hidden="true">${esc(n.icon)}</span>`:''}
+      <input class="olin${n.done?' done':''}" data-olid="${n.id}" value="${esc(n.t)}" aria-label="第 ${lv+1} 層${n.collapsed&&has?'（已收合）':''}" autocomplete="off" spellcheck="false" enterkeyhint="next">
+      <span class="olmeta">${tg.map(t=>`<span class="oltag">#${esc(t)}</span>`).join('')}${n.link?`<a class="olmi" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer" tabindex="-1" aria-label="開啟連結">${I('link')}</a>`:''}${n.img?`<span class="olmi" title="有圖片" aria-label="有圖片">${I('image')}</span>`:''}${n.note?`<button class="olmi" data-act="olNote" data-v="${n.id}" tabindex="-1" aria-label="備註：${esc(n.note.slice(0,40))}">${I('note')}</button>`:''}</span></div>`);
+    if(!n.collapsed||lv===0) k.forEach(c=>w(c,lv+1)); })(root,0);
+  return `<div class="outline" role="region" aria-label="大綱（可編輯）"><div class="doc"><div class="olhead"><div><h2>大綱</h2><p class="olhint">${m?'點一行就能改字；下方按鈕可縮排、移動或刪除。':'直接改字 · <span class="kbd">Enter</span> 新增 · <span class="kbd">Tab</span> 縮排 · <span class="kbd">Shift+Tab</span> 退一層 · <span class="kbd">Alt+↑↓</span> 移動 · <span class="kbd">Esc</span> 回心智圖'}</p></div><button class="btn" data-act="outline">${I('mapic')}回到心智圖</button></div>
+    <div class="olt" role="tree" aria-label="${esc(root.t)}，共 ${N} 個節點">${rows.join('')}</div></div>
+    ${m?`<div class="olbar" role="toolbar" aria-label="大綱編輯">${[['olOutdent','outdent','取消縮排'],['olIndent','indent','縮排'],['olUp','up','上移'],['olDown','down','下移'],['olAdd','plus','新增'],['olDel','trash','刪除']].map(([a,i,l])=>`<button data-act="${a}" aria-label="${l}">${I(i)}<span>${l}</span></button>`).join('')}</div>`:''}</div>`;}
+
 export function homeTop(S,title){return `<header class="top"><button class="icon-btn mobile-only" data-act="nav" aria-label="開啟選單：分類、設定、GitHub 狀態">${I('menu')}</button><div class="title"><h1>${esc(title)}</h1></div><div class="right-actions"><button class="btn desk-only" data-act="mdImport">${I('paste')}匯入／貼上大綱</button><button class="btn primary" data-act="ai">${I('spark')}AI 產生</button></div></header>`;}
 const starter=()=>`<div class="starter">
     <button class="stc" data-act="new"><div class="ic" style="background:#EEF0FF;color:#3F51E8">${I('plus')}</div><div><b>空白心智圖</b><span>從中心主題開始</span></div></button>
@@ -126,7 +151,7 @@ export function home(S,list,docs){ const f=S.filter; const titles={all:'所有�
   else items.sort((a,b)=>S.sort==='name'?(a.title||'').localeCompare(b.title||'','zh-Hant'):S.sort==='created'?(b.created||'').localeCompare(a.created||''):(b.updated||'').localeCompare(a.updated||''));
   const q=(S.q||'').trim().toLowerCase(); const shown=q?items.filter(m=>(m.title||'').toLowerCase().includes(q)):items;
   const live=list.filter(m=>!m.trashed);
-  const cards=shown.map(m=>{const d=docs(m.id), th=THEMES[m.theme||DEFAULT_THEME];return `<div class="card"><a href="#/map/${m.id}" class="thumb" style="display:block;background-color:${th.canvas}" aria-label="開啟 ${esc(m.title)}">${d?thumbSvg(d.root,th,d&&JSON.stringify(d.root).length>8000?20:30):''}</a>
+  const cards=shown.map(m=>{const d=docs(m.id), th=THEMES[m.theme||DEFAULT_THEME];return `<div class="card"><a href="#/map/${m.id}" class="thumb" style="display:block;background-color:${th.canvas}" aria-label="開啟 ${esc(m.title)}">${d?thumbSvg(d.root,th,d&&JSON.stringify(d.root).length>8000?20:30,d.settings||{}):''}</a>
       <div class="cinfo"><div class="fi" style="background:${th.canvas==='#FFFFFF'?'#FFF1E6':th.canvas}" aria-hidden="true">${esc(m.icon||'🧠')}</div><div style="min-width:0"><b>${esc(m.title||'未命名')}</b><span class="meta">${m.star?'<span class="star" aria-label="已加星號">★</span>':''}${f==='trash'?'刪除於 '+rel(m.trashedAt):rel(m.updated)+' 編輯'}${m.dirty&&S.remote?'<span class="badge">未同步</span>':''}</span></div><button class="icon-btn more" data-act="cardMenu" data-v="${m.id}" aria-haspopup="menu" aria-expanded="false" aria-label="${esc(m.title)} 的更多動作">${I('more')}</button></div></div>`;}).join('');
   const emptyBox=q?`<div class="empty"><h3>找不到「${esc(S.q)}」</h3><p>換個關鍵字，或清除搜尋看全部的圖。</p><div class="acts"><button class="btn" style="height:44px" data-act="clearSearch">清除搜尋</button></div></div>`
     :f==='trash'?`<div class="empty"><h3>垃圾桶是空的</h3><p>移到垃圾桶的圖會保留在這裡，可以還原或永久刪除。</p></div>`
@@ -253,7 +278,8 @@ export function mdDialog(D,tree,count){ const radio=(v,t,sub)=>`<button class="r
     ${D.nodeId?`<p class="sr" id="mdt-h">加到哪裡</p><div class="choices2 mdtarget" role="radiogroup" aria-labelledby="mdt-h">${radio('node',`加到「${esc(D.nodeT)}」底下`,'成為選取節點的子主題')}${radio('new','建立新的心智圖','第一個標題當中心主題')}</div>`:''}
     <div class="mdgrid">
      <div class="mdcol"><label for="md-in" class="mdlab">Markdown</label><textarea class="ta mdta" id="md-in" data-input="mdText" spellcheck="false" placeholder="# 名古屋旅行&#10;## 行程&#10;- Day 1&#10;  - 熱田神宮&#10;## 美食&#10;- 味噌豬排">${esc(D.md||'')}</textarea>
-      <div class="mdtools"><button class="btn" data-act="mdPick">${I('upload')}選擇檔案…</button><button class="btn" data-act="mdClip">${I('paste')}從剪貼簿貼上</button></div></div>
+      <div class="mdtools"><button class="btn" data-act="mdPick">${I('upload')}選擇檔案…</button><button class="btn" data-act="mdClip">${I('paste')}從剪貼簿貼上</button></div>
+      <label class="mdopt"><input type="checkbox" data-md="linkNote"${D.linkNote?'':' checked'}><i class="box" aria-hidden="true">${I('check')}</i><span>網址存成節點的「連結」<small>取消勾選：照舊寫進備註「連結：網址」</small></span></label></div>
      <div class="mdcol"><div class="mdlab" id="md-count" aria-live="polite">預覽 · 共 ${count} 個節點</div><div class="preview mdprev" id="md-prev">${mdPreview(tree,count)}</div></div>
     </div></div>
    <div class="mfoot"><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button><button class="btn primary" id="md-ok" data-act="mdOk"${count?'':' disabled'}>${mdOkLabel(D,count)}</button></div></div></div>`; }
@@ -261,3 +287,31 @@ export function mdDialog(D,tree,count){ const radio=(v,t,sub)=>`<button class="r
 // ---------- node search bar (v1.3) ----------
 export function findCount(F){ if(!F||!F.q.trim()) return ''; if(!F.hits.length) return '找不到'; return `${F.i+1} / ${F.hits.length}`; }
 export function findbar(S){ const F=S.find; return `<div class="findbar" id="findbar" role="search" aria-label="搜尋節點"><span class="fic" aria-hidden="true">${I('search')}</span><label class="sr" for="findq">搜尋節點</label><input id="findq" data-input="find" value="${esc(F.q)}" placeholder="搜尋節點文字或備註" autocomplete="off" spellcheck="false" enterkeyhint="search"><span class="fcount" id="findcount" aria-live="polite">${findCount(F)}</span><button class="icon-btn" data-act="findPrev" aria-label="上一個（Shift+Enter）">${I('up')}</button><button class="icon-btn" data-act="findNext" aria-label="下一個（Enter）">${I('chevD')}</button><button class="icon-btn" data-act="findClose" aria-label="關閉搜尋（Esc）">${I('x')}</button></div>`; }
+
+// ---------- layout thumbnails (v1.4) ----------
+export function layoutThumb(k){ const L='var(--ctl)', A='var(--accent)', box=(x,y,w,h,f)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${f||'var(--panel)'}" stroke="${f?'none':L}" stroke-width="1.2"/>`;
+  const p=d=>`<path d="${d}" fill="none" stroke="${L}" stroke-width="1.4" stroke-linecap="round"/>`;
+  let g='';
+  if(k==='right') g=p('M30 30H38V12H50M38 30H50M38 30V48H50')+box(8,24,22,12,A)+box(50,7,22,10)+box(50,25,22,10)+box(50,43,22,10);
+  else if(k==='balanced') g=p('M51 30H58V15H66M58 30V45H66M29 30H22V15H14M22 30V45H14')+box(29,24,22,12,A)+box(66,10,12,10)+box(66,40,12,10)+box(2,10,12,10)+box(2,40,12,10);
+  else g=p('M40 18V24H16V30M40 24H64V30M40 24V30M16 40V46H22M16 46V52H22M64 40V46H70')+box(29,6,22,12,A)+box(6,30,20,10)+box(30,30,20,10)+box(54,30,20,10)+box(22,42,14,8)+box(22,50,14,8)+box(70,42,8,8);
+  return `<svg viewBox="0 0 80 60" aria-hidden="true">${g}</svg>`; }
+
+// ---------- icon / emoji picker (v1.4) ----------
+export const EMOJI=[
+ ['mark','標記',[['⭐️','星 重要 收藏'],['✅','完成 打勾 好'],['❗️','重要 注意 驚嘆'],['❓','問題 疑問'],['💡','想法 點子 靈感'],['📌','釘選 重點'],['🔥','熱門 緊急 火'],['🎯','目標 重點'],['⚠️','警告 風險 注意'],['🚩','旗子 里程碑'],['❌','不要 錯 取消'],['⏳','等待 進行中'],['🔒','鎖 機密 私人'],['👍','讚 同意'],['👎','不同意'],['💯','滿分 完美'],['🏆','獎盃 成就 冠軍']]],
+ ['work','工作',[['📅','日期 行程 日曆'],['🗓️','行事曆 計畫'],['⏰','時間 鬧鐘 截止'],['📝','筆記 備註 寫'],['📋','清單 待辦'],['📊','報表 數據 圖表'],['📈','成長 上升'],['📉','下降'],['💼','工作 公事包'],['📁','資料夾 檔案'],['📎','附件 迴紋針'],['✉️','信 郵件 email'],['📞','電話 聯絡'],['💬','討論 對話 留言'],['👥','團隊 人 成員'],['🧑‍💻','工程師 開發 程式'],['🛠️','工具 修理 開發'],['⚙️','設定 齒輪'],['🔍','搜尋 研究'],['🧪','實驗 測試'],['🚀','上線 發布 啟動'],['💰','錢 預算 費用'],['🧾','收據 帳單'],['🎓','學習 畢業 教育']]],
+ ['travel','旅行',[['✈️','飛機 航班 機場'],['🚄','高鐵 新幹線 火車'],['🚇','地鐵 捷運'],['🚌','公車 巴士'],['🚗','車 開車 自駕'],['🚲','腳踏車'],['🏨','飯店 住宿 旅館'],['🏯','城 城堡 日本'],['⛩️','神社 鳥居'],['🗼','塔 東京'],['🏖️','海邊 沙灘 度假'],['⛰️','山 登山'],['🗺️','地圖 路線'],['🧳','行李 打包'],['🎫','票 門票'],['📷','拍照 相機'],['🛍️','購物 逛街'],['🎡','遊樂園']]],
+ ['food','美食',[['🍜','拉麵 麵 美食'],['🍣','壽司'],['🍱','便當'],['🍙','飯糰'],['🍛','咖哩 飯'],['🍔','漢堡'],['🍕','披薩'],['🥗','沙拉 健康'],['🍰','蛋糕 甜點'],['☕️','咖啡'],['🍵','茶'],['🍺','啤酒 喝酒'],['🍷','紅酒'],['🍎','蘋果 水果'],['🥩','肉 牛排'],['🍤','炸蝦 天婦羅']]],
+ ['life','生活',[['🏠','家 房子'],['🛒','購物 採買 超市'],['💊','藥 健康'],['🏃','運動 跑步'],['🧘','冥想 放鬆 瑜伽'],['😴','睡覺 休息'],['🎂','生日 慶祝'],['🎁','禮物'],['🎉','慶祝 派對'],['❤️','愛 喜歡 心'],['👶','寶寶 小孩'],['🐶','狗 寵物'],['🐱','貓 寵物'],['🌱','成長 植物 新手'],['☀️','晴天 太陽'],['🌧️','下雨 天氣'],['🎵','音樂'],['📚','書 閱讀 學習'],['🎮','遊戲'],['🎬','電影']]],
+ ['face','表情',[['😀','開心 笑'],['😊','微笑 滿意'],['😂','大笑'],['🤔','思考 想一想'],['😮','驚訝'],['😢','難過'],['😡','生氣'],['😎','酷'],['🥳','慶祝'],['🙏','拜託 感謝'],['👏','拍手 鼓掌'],['💪','加油 努力']]]];
+export function emojiGrid(list,cur){ const nz=x=>String(x||'').replace(/\uFE0F/g,''); const ci=list.findIndex(([e])=>nz(e)===nz(cur)); const fi=ci<0?0:ci; return list.length?list.map(([e,k],i)=>`<button class="emb" role="gridcell" data-act="emojiSet" data-v="${e}" aria-label="${esc(e)} ${esc(k.split(' ')[0])}" aria-pressed="${i===ci}" tabindex="${i===fi?0:-1}">${e}</button>`).join(''):'<p class="emnone">找不到符合的圖示，換個關鍵字試試（例如：旅行、重要、錢）</p>'; }
+export const emojiCatOf=e=>{ const k=String(e||'').replace(/\uFE0F/g,''); return (k&&EMOJI.find(c=>c[2].some(([x])=>x.replace(/\uFE0F/g,'')===k))||EMOJI[0])[0]; };
+export function emojiList(D){ const q=(D.q||'').trim().toLowerCase(); if(q) return EMOJI.flatMap(c=>c[2]).filter(([e,k])=>k.toLowerCase().includes(q)||e===q); return (EMOJI.find(c=>c[0]===D.cat)||EMOJI[0])[2]; }
+export function emojiDialog(D,cur,recent){ return `<div class="scrim" data-act="scrim"><div class="modal emmodal" role="dialog" aria-modal="true" aria-labelledby="em-h">
+  <div class="mhead"><div class="spark" aria-hidden="true">${I('smile')}</div><div><h3 id="em-h">選擇圖示</h3><p>給「${esc(D.nodeT)}」${cur?`，目前：${esc(cur)}`:''}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
+  <div class="mbody"><div class="emsearch">${I('search')}<label class="sr" for="em-q">搜尋圖示</label><input id="em-q" data-input="emojiQ" value="${esc(D.q||'')}" placeholder="搜尋：旅行、重要、錢、會議…" autocomplete="off"></div>
+   ${recent.length&&!D.q?`<div class="emrow"><span class="emlab">最近使用</span><div class="emrecent">${recent.map(e=>`<button class="emb" data-act="emojiSet" data-v="${e}" aria-label="最近使用 ${e}">${e}</button>`).join('')}</div></div>`:''}
+   <div class="emcats" role="tablist" aria-label="分類"${D.q?' hidden':''}>${EMOJI.map(([k,l])=>`<button role="tab" data-act="emojiCat" data-v="${k}" aria-selected="${(D.cat||'mark')===k}" tabindex="${(D.cat||'mark')===k?0:-1}">${l}</button>`).join('')}</div>
+   <div class="emgrid" id="emgrid" role="grid" aria-label="${D.q?'搜尋結果':'圖示'}">${emojiGrid(emojiList(D),cur)}</div></div>
+  <div class="mfoot"><button class="btn" data-act="emojiSet" data-v=""${cur?'':' disabled'}>${I('x')}移除圖示</button><span class="emtip desk-only">方向鍵選擇 · Enter 套用</span><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button></div></div></div>`; }

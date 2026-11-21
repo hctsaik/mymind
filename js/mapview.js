@@ -12,7 +12,13 @@ export const allDeep=(n,a=[])=>{a.push(n);(n.c||[]).forEach(c=>allDeep(c,a));ret
 export const countDesc=n=>(n.c||[]).reduce((s,c)=>s+1+countDesc(c),0);
 const SPACING={compact:[48,6],standard:[64,10],loose:[84,16]};
 
+export const tagsOf=n=>Array.isArray(n.tags)?n.tags:(n.tag?[n.tag]:[]);
+export const IMG_MAX=[200,140];
+export function imgBox(img){ if(!img||!img.src) return null; const w=img.w||160,h=img.h||120,k=Math.min(1,IMG_MAX[0]/w,IMG_MAX[1]/h); return {w:Math.round(w*k),h:Math.round(h*k)}; }
+const TAGF=`600 11.5px ${FF}`;
+export function tagChips(n){ const t=tagsOf(n); const shown=t.slice(0,3).map(x=>'#'+x); if(t.length>3) shown.push('+'+(t.length-3)); return shown; }
 function prep(n,d,br,boxed,th,par){
+  if(d>0&&Number.isInteger(n.color)) br={m:n.color};
   n.d=d; n.br=br; n.parent=par||null;
   const fs=fsOf(d), padX=d===0?28:d===1?18:(boxed?12:8), F=fontOf(d,th), t=n.t||' ';
   const MAXT=d===0?300:d===1?200:160, full=tw(t,F);
@@ -26,8 +32,9 @@ function prep(n,d,br,boxed,th,par){
   let w=n.lines?Math.max(...n.lines.map(l=>tw(l,F))):full;
   n.lh=n.lines?Math.round(fs*1.45):0;
   if(n.icon) w+=fs*1.15+6; if(n.pri) w+=24; if(n.done) w+=24;
-  if(n.tag) w+=tw(n.tag,`600 11.5px ${FF}`)+16+8; if(n.note) w+=22;
-  n.w=Math.ceil(w+padX*2); n.h=(d===0?58:d===1?42:(boxed?34:32))+n.lh; n.padX=padX;
+  tagChips(n).forEach(c=>{ w+=tw(c,TAGF)+16+6; }); if(tagChips(n).length) w+=2; if(n.note) w+=22; if(n.link) w+=22;
+  const ib=imgBox(n.img); n.ib=ib; n.ih=ib?ib.h+10:0;
+  n.w=Math.ceil(Math.max(w,ib?ib.w:0)+padX*2); n.h=(d===0?58:d===1?42:(boxed?34:32))+n.lh+n.ih; n.padX=padX;
   (n.c||[]).forEach((c,i)=>prep(c,d+1,d===0?i:br,boxed,th,n));
 }
 function subH(n,g1){const k=kids(n); if(!k.length) return n.h; const g=n.d===0?26:g1; return Math.max(n.h,k.reduce((s,c)=>s+subH(c,g1),0)+g*(k.length-1));}
@@ -38,19 +45,43 @@ function placeH(n,cx,top,hg1,g1){
   let y=n.y-tot/2; const hg=n.d===0?hg1:Math.round(hg1*.62);
   k.forEach(c=>{placeH(c,n.x+n.w/2+hg+c.w/2,y,hg1,g1); y+=subH(c,g1)+g;});
 }
+function mirror(n){ n.x=-n.x; n.side=-1; kids(n).forEach(mirror); }
+function placeBalanced(root,hg,g){ root.x=0; root.y=0; root.side=0; const k=kids(root); if(!k.length) return;
+  const hs=k.map(c=>subH(c,g)), total=hs.reduce((a,b)=>a+b,0); let acc=0, cut=k.length;
+  for(let i=0;i<k.length;i++){ if(acc>=total/2&&i>0){ cut=i; break; } acc+=hs[i]; } if(cut===k.length&&k.length>1) cut=Math.ceil(k.length/2);
+  const R=k.slice(0,cut), L=k.slice(cut); const G=26;
+  for(const [grp,sgn] of [[R,1],[L,-1]]){ if(!grp.length) continue; const tot=grp.reduce((s,c)=>s+subH(c,g),0)+G*(grp.length-1); let y=-tot/2;
+    grp.forEach(c=>{ placeH(c,root.w/2+hg+c.w/2,y,hg,g); if(sgn<0) mirror(c); y+=subH(c,g)+G; }); }
+  root.sides={R:R.map(c=>c.id),L:L.map(c=>c.id)}; }
+const ORG={vg:58,hg:28,ind:24,rg:10};
+function orgColW(n,ind){ let w=n.w+ind; kids(n).forEach(c=>{ w=Math.max(w,orgColW(c,ind+ORG.ind)); }); return w; }
+function orgCol(n,left,ind,yRef){ kids(n).forEach(c=>{ c.x=left+ind+c.w/2; c.y=yRef.y+c.h/2; c.side=2; yRef.y+=c.h+ORG.rg; orgCol(c,left,ind+ORG.ind,yRef); }); }
+function placeOrg(root){ root.x=0; root.y=0; root.side=0; const k=kids(root); if(!k.length) return;
+  const ws=k.map(c=>orgColW(c,0)), total=ws.reduce((a,b)=>a+b,0)+ORG.hg*(k.length-1); let x=-total/2; const top=root.h/2+ORG.vg;
+  const hmax=Math.max(...k.map(c=>c.h));
+  k.forEach((c,i)=>{ c.x=x+c.w/2; c.y=top+hmax/2; c.side=3; const yRef={y:top+hmax+ORG.rg+4}; orgCol(c,x,ORG.ind,yRef); x+=ws[i]+ORG.hg; }); }
+export const LAYOUTS=[['right','向右邏輯圖'],['balanced','左右心智圖'],['org','組織圖']];
 export function layout(root,th,st={}){
-  const boxed=!!th.deepBox; const [hg,g]=SPACING[st.spacing||'standard']||SPACING.standard;
-  prep(root,0,0,boxed,th,null); root.boxed=boxed;
-  placeH(root,0,-subH(root,g)/2,hg,g);
-  if((st.rootTop??th.rootTop)&&kids(root).length){root.y=kids(root)[0].y;}
+  const boxed=!!th.deepBox; const [hg,g]=SPACING[st.spacing||'standard']||SPACING.standard; const mode=['balanced','org'].includes(st.layout)?st.layout:'right';
+  prep(root,0,0,boxed,th,null); root.boxed=boxed; root.layout=mode;
+  if(mode==='balanced') placeBalanced(root,hg,g);
+  else if(mode==='org') placeOrg(root);
+  else { placeH(root,0,-subH(root,g)/2,hg,g); if((st.rootTop??th.rootTop)&&kids(root).length){root.y=kids(root)[0].y;} }
   return root;
 }
-export function bounds(root){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;all(root).forEach(n=>{x0=Math.min(x0,n.x-n.w/2);x1=Math.max(x1,n.x+n.w/2+(n.collapsed&&n.c&&n.c.length?28:0));y0=Math.min(y0,n.y-n.h/2);y1=Math.max(y1,n.y+n.h/2)});return{x0,y0,x1,y1,w:x1-x0,h:y1-y0};}
-export function colorOf(n,th){return n.d===0?th.root:th.br[n.br%th.br.length]}
+export function bounds(root){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;all(root).forEach(n=>{const cc=n.collapsed&&n.c&&n.c.length?28:0; x0=Math.min(x0,n.x-n.w/2-(n.side===-1?cc:0));x1=Math.max(x1,n.x+n.w/2+(n.side===-1?0:cc));y0=Math.min(y0,n.y-n.h/2);y1=Math.max(y1,n.y+n.h/2)});return{x0,y0,x1,y1,w:x1-x0,h:y1-y0};}
+export function colorOf(n,th){ if(n.d===0) return th.root; if(n.br&&typeof n.br==='object'){ const M=marks(th); return M[n.br.m%M.length][0]; } return th.br[n.br%th.br.length]; }
+// Colour marks: the theme's own branch colours when it has enough distinct ones, else a fixed set tuned for light/dark.
+// Each has a plain name so the picker never relies on colour alone.
+const MARKS_L=[['#D9433A','紅'],['#E07B1F','橘'],['#C99A06','黃'],['#2E9E5B','綠'],['#2F7BDB','藍'],['#8A55D6','紫']];
+const MARKS_D=[['#FF6B6B','紅'],['#FFA552','橘'],['#F2CC4B','黃'],['#4FD18B','綠'],['#6BA8FF','藍'],['#B794F6','紫']];
+export function hueName(hex){ const h=hex.replace('#',''); const [r,g,b]=[0,2,4].map(i=>parseInt(h.slice(i,i+2),16)/255); const mx=Math.max(r,g,b),mn=Math.min(r,g,b),dl=mx-mn; if(dl<.12) return mx>.6?'淺灰':'灰'; let H=mx===r?((g-b)/dl)%6:mx===g?(b-r)/dl+2:(r-g)/dl+4; H=(H*60+360)%360;
+  return H<15||H>=340?'紅':H<40?'橘':H<70?'黃':H<165?'綠':H<200?'青':H<255?'藍':H<290?'紫':'粉'; }
+export function marks(th){ const u=[...new Set(th.br.map(c=>c.toUpperCase()))]; if(u.length>=5) return u.slice(0,6).map(c=>[c,hueName(c)]); return th.dark?MARKS_D:MARKS_L; }
 
 /* opt: {sel:id, lightLines:bool, sc:number (current zoom, for minimum visual line width), thumb, edge:'bracket'|'curve'|'straight', lw:'thin'|'standard'|'thick', lod, drop:id} */
 export function renderMap(root,th,opt={}){
-  const nodes=all(root); let edges='',body='';
+  const nodes=all(root); let edges='',body='',defs='';
   const nodeBg=th.dark?'#1E2128':'#FFFFFF';
   const CV=th.canvas, LIGHT=!!(opt.lightLines&&th.lineLight&&!opt.thumb), G=(c,bg=CV)=>LIGHT?c:readable(c,bg,3);
   const SEL=lum(CV)>.35?'#3F51E8':'#8B9BFF', SELK=lum(CV)>.35?'#FFFFFF':'#0E1020';
@@ -58,17 +89,24 @@ export function renderMap(root,th,opt={}){
   const edge=opt.edge||th.edge||'curve', mult={thin:.75,standard:1,thick:1.5}[opt.lw||'standard']||1;
   // minimum visual line width: never thinner than 1.5 CSS px on screen, whatever the zoom (review r4 dev-suggestion 3)
   const minW=opt.sc?1.5/opt.sc:0;
+  const ORGM=root.layout==='org';
   nodes.forEach(n=>[...kids(n)].sort((a,b)=>Math.abs(b.y-n.y)-Math.abs(a.y-n.y)).forEach(c=>{
     const col=colorOf(c,th); let p='';
-    const x1=n.x+n.w/2-(th.deep==='plain'&&n.d>=2?(n.padX-5):0), x2=c.x-c.w/2+(th.deep==='plain'&&c.d>=2?(c.padX-5):0);
-    if(edge==='bracket'){
+    const s=c.side===-1?-1:1, plainOff=(m)=>th.deep==='plain'&&m.d>=2?(m.padX-5):0;
+    const x1=n.x+s*(n.w/2-plainOff(n)), x2=c.x-s*(c.w/2-plainOff(c));
+    if(ORGM){ const r=8; const under=c.d>=2&&!root.boxed&&th.deep!=='plain';
+      if(c.side===3){ const yb=n.y+n.h/2, yt=c.y-c.h/2, ym=yb+ORG.vg/2, dx=c.x-n.x, sg=Math.sign(dx), rr=Math.min(r,Math.abs(dx)/2);
+        p=Math.abs(dx)<1?`M${n.x},${yb} V${yt}`:`M${n.x},${yb} V${ym-rr} Q${n.x},${ym} ${n.x+sg*rr},${ym} H${c.x-sg*rr} Q${c.x},${ym} ${c.x},${ym+rr} V${yt}`; }
+      else { const px=n.x-n.w/2+Math.min(16,n.w/3), yb=n.y+n.h/2-(n.d>=2&&!root.boxed&&th.deep!=='plain'?0:0), y2=under?c.y+c.h/2:c.y, xe=c.x-c.w/2;
+        p=`M${px},${yb} V${y2-r} Q${px},${y2} ${px+r},${y2} H${xe}`; if(under) p+=` H${c.x+c.w/2}`; }
+    } else if(edge==='bracket'){
       const xm=x1+(x2-x1)*.5, dy=c.y-n.y, r=Math.min(th.er||8,Math.abs(dy)), sg=Math.sign(dy);
-      p=Math.abs(dy)<1?`M${x1},${n.y} H${x2}`:`M${x1},${n.y} H${xm} V${c.y-sg*r} Q${xm},${c.y} ${xm+r},${c.y} H${x2}`;
+      p=Math.abs(dy)<1?`M${x1},${n.y} H${x2}`:`M${x1},${n.y} H${xm} V${c.y-sg*r} Q${xm},${c.y} ${xm+s*r},${c.y} H${x2}`;
     } else if(edge==='straight'){ p=`M${x1},${n.y} L${x2},${c.y}`; }
-    else { const under=c.d>=2&&!root.boxed&&th.deep!=='plain'; const y2=under?c.y+c.h/2:c.y, sx=n.d===0? n.x+(n.w/2-10):x1, xe=c.x-c.w/2, dx=(xe-sx)*.5;
-      p=`M${sx},${n.y} C${sx+dx},${n.y} ${xe-dx},${y2} ${xe},${y2}`; if(under) p+=` L${c.x+c.w/2},${y2}`; }
+    else { const under=c.d>=2&&!root.boxed&&th.deep!=='plain'; const y2=under?c.y+c.h/2:c.y, sx=n.d===0? n.x+s*(n.w/2-10):x1, xe=c.x-s*c.w/2, dx=(xe-sx)*.5;
+      p=`M${sx},${n.y} C${sx+dx},${n.y} ${xe-dx},${y2} ${xe},${y2}`; if(under) p+=` L${c.x+s*c.w/2},${y2}`; }
     const base=th.lw||(th.line?(n.d===0?1.8:1.2):(edge==='bracket'?(n.d===0?2.6:1.6):(n.d===0?3.2:2)));
-    edges+=`<path data-g="edge" data-gbg="${CV}" d="${p}" fill="none" stroke="${lineC?G(lineC):G(col)}" stroke-width="${Math.max(base*mult,minW).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    edges+=`<path data-g="edge" data-gbg="${CV}" d="${p}" fill="none" stroke="${lineC&&!(c.br&&typeof c.br==='object')?G(lineC):G(col)}" stroke-width="${Math.max(base*mult,minW).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   }));
   nodes.forEach(n=>{
     const col0=colorOf(n,th), col=n.d===0?th.root:brC(n), x=n.x-n.w/2, y=n.y-n.h/2, d=n.d; let g='';
@@ -92,33 +130,36 @@ export function renderMap(root,th,opt={}){
     g+=`<rect class="hit"${fill==='none'&&stroke==='none'?'':` data-g="node" data-gbg="${CV}"`} x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${rx}" fill="${fill==='none'?'transparent':fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
     if(d>=2&&!root.boxed&&th.deep!=='plain'&&edge!=='bracket') g+=`<line data-g="edge" data-gbg="${CV}" x1="${x}" y1="${y+n.h}" x2="${x+n.w}" y2="${y+n.h}" stroke="${G(col)}" stroke-width="${Math.max(2,minW)}" stroke-linecap="round"/>`;
     if(opt.lod&&d>=2){g+=`<rect x="${x+n.padX}" y="${n.y-4}" width="${Math.max(10,(n.w-2*n.padX)*.8)}" height="8" rx="4" data-g="lod" data-gbg="${bgc}" fill="${G(mix(bgc,col,.45),bgc)}"/>`; body+=`<g class="node" data-id="${n.id}">${g}</g>`; return;}
-    const F=fontOf(d,th); let cx=x+n.padX; const fs=fsOf(d), ty=n.y+fs*.36;
-    if(n.pri){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${n.y}" r="9" fill="${PRI[n.pri]}"/><text x="${cx+9}" y="${n.y+4}" font-size="11.5" font-weight="700" fill="#FFFFFF" data-bg="${PRI[n.pri]}" text-anchor="middle">${n.pri}</text>`; cx+=24;}
-    if(n.done){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${n.y}" r="9" fill="#0E7A56"/><path data-g="icon" data-gbg="#0E7A56" d="M${cx+5},${n.y} l3,3 l5,-6" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round"/>`; cx+=24;}
+    const F=fontOf(d,th); let cx=x+n.padX; const fs=fsOf(d), ry=n.y+(n.ih||0)/2, ty=ry+fs*.36;
+    if(n.ib){ const iw=n.ib.w, ih=n.ib.h, ix=n.x-iw/2, iy=y+(d===0?8:6); const cid='ic'+String(n.id).replace(/[^\w-]/g,''); defs+=`<clipPath id="${cid}"><rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6"/></clipPath>`;
+      g+=`<rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6" fill="${th.dark?'#2A2E36':'#F2F3F5'}"/><image href="${esc(n.img.src)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${cid})"><title>${esc(n.img.alt||'圖片')}</title></image><rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6" fill="none" stroke="${th.dark?'#4A505C':'#D5D9DF'}" stroke-width="1"/>`; }
+    if(n.pri){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${ry}" r="9" fill="${PRI[n.pri]}"/><text x="${cx+9}" y="${ry+4}" font-size="11.5" font-weight="700" fill="#FFFFFF" data-bg="${PRI[n.pri]}" text-anchor="middle">${n.pri}</text>`; cx+=24;}
+    if(n.done){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${ry}" r="9" fill="#0E7A56"/><path data-g="icon" data-gbg="#0E7A56" d="M${cx+5},${ry} l3,3 l5,-6" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round"/>`; cx+=24;}
     if(n.icon){g+=`<text x="${cx}" y="${ty}" font-size="${fs}" aria-hidden="true">${esc(n.icon)}</text>`; cx+=fs*1.15+6;}
     const TW=n.lines?Math.max(...n.lines.map(l=>tw(l,F))):tw(n.t||' ',F);
-    if(n.hl&&th.hl!==undefined){const hl=typeof n.hl==='string'?n.hl:(th.hl||'#FFE27A'); g+=`<rect x="${cx-4}" y="${n.y-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable(th.text,hl,4.5); bgc=hl;}
-    else if(n.hl){const hl=typeof n.hl==='string'?n.hl:'#FFE27A'; g+=`<rect x="${cx-4}" y="${n.y-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable('#1F2329',hl,4.5); bgc=hl;}
+    if(n.hl&&th.hl!==undefined){const hl=typeof n.hl==='string'?n.hl:(th.hl||'#FFE27A'); g+=`<rect x="${cx-4}" y="${ry-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable(th.text,hl,4.5); bgc=hl;}
+    else if(n.hl){const hl=typeof n.hl==='string'?n.hl:'#FFE27A'; g+=`<rect x="${cx-4}" y="${ry-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable('#1F2329',hl,4.5); bgc=hl;}
     g+=n.lines?`<text x="${cx}" y="${ty-n.lh/2}" font-size="${fs}" font-weight="${fw}" fill="${txt}" data-bg="${bgc}"><tspan x="${cx}">${esc(n.lines[0])}</tspan><tspan x="${cx}" dy="${n.lh}">${esc(n.lines[1])}</tspan></text>`
       :`<text x="${cx}" y="${ty}" font-size="${fs}" font-weight="${fw}" fill="${txt}" data-bg="${bgc}">${esc(n.t||'')}</text>`;
     cx+=TW;
-    if(n.tag){const w=tw(n.tag,`600 11.5px ${FF}`)+16, tbg=tint(col0,.16,bgc), tfg=readable(col0,tbg,4.6);
-      g+=`<rect x="${cx+8}" y="${n.y-10}" width="${w}" height="20" rx="10" fill="${tbg}" data-g="tag" data-gbg="${bgc}" stroke="${readable(col0,bgc,3)}" stroke-width="1"/><text x="${cx+16}" y="${n.y+4}" font-size="11.5" font-weight="600" fill="${tfg}" data-bg="${tbg}">${esc(n.tag)}</text>`; cx+=w+8;}
-    if(n.note){g+=`<g class="noteic" data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${n.y-8}) scale(.68)" stroke="${readable(th.dark?'#A3AAB6':'#646A73',bgc,3)}" fill="none" stroke-width="2" stroke-linecap="round"><path d="${P.note}"/></g>`;}
-    if(n.collapsed&&n.c&&n.c.length){const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
+    { const chips=tagChips(n); if(chips.length) cx+=2; chips.forEach(tg=>{ const w=tw(tg,TAGF)+16, tbg=tint(col0,.16,bgc), tfg=readable(col0,tbg,4.6);
+      g+=`<rect x="${cx+6}" y="${ry-10}" width="${w}" height="20" rx="10" fill="${tbg}" data-g="tag" data-gbg="${bgc}" stroke="${readable(col0,bgc,3)}" stroke-width="1"/><text x="${cx+14}" y="${ry+4}" font-size="11.5" font-weight="600" fill="${tfg}" data-bg="${tbg}">${esc(tg)}</text>`; cx+=w+6; }); }
+    if(n.link){ const tch=typeof matchMedia==='function'&&matchMedia('(max-width:768px),(pointer:coarse)').matches; g+=(tch?`<g class="linkic" aria-hidden="true">`:`<a href="${esc(n.link)}" target="_blank" rel="noopener noreferrer" class="linkic" aria-label="開啟連結：${esc(n.link)}">`)+`<rect x="${cx+3}" y="${ry-11}" width="22" height="22" fill="transparent"/><g data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${ry-8}) scale(.68)" stroke="${readable(th.dark?'#8B9BFF':'#3F51E8',bgc,3)}" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="${P.link}"/></g>`+(tch?'</g>':'</a>'); cx+=22;}
+    if(n.note){g+=`<g class="noteic" data-g="icon" data-gbg="${bgc}" transform="translate(${cx+6},${ry-8}) scale(.68)" stroke="${readable(th.dark?'#A3AAB6':'#646A73',bgc,3)}" fill="none" stroke-width="2" stroke-linecap="round"><path d="${P.note}"/></g>`;}
+    if(n.collapsed&&n.c&&n.c.length){const ccx=n.x+(n.side===-1?-1:1)*(n.w/2+14), ccy=n.y, cfg=readable(col,nodeBg,4.5);
       g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點"><circle data-g="collapse" data-gbg="${CV}" cx="${ccx}" cy="${ccy}" r="10" fill="${nodeBg}" stroke="${G(col)}" stroke-width="1.6"/><text x="${ccx}" y="${ccy+4}" font-size="11.5" font-weight="700" fill="${cfg}" data-bg="${nodeBg}" text-anchor="middle">${countDesc(n)}</text></g>`;}
     if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
     if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
       g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
     if(opt.sel===n.id&&!opt.thumb){
       g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
-      const hx=n.x+n.w/2+(n.collapsed&&n.c&&n.c.length?44:22), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
+      const hx=n.x+(n.side===-1?-1:1)*(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
       g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
     body+=`<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`;
   });
-  return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter></defs><g class="edges">${edges}</g>${body}`,b:bounds(root)};
+  return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>${defs}</defs><g class="edges">${edges}</g>${body}`,b:bounds(root)};
 }
-export function thumbSvg(data,th,pad=30){const r=layout(JSON.parse(JSON.stringify(data)),th);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}
+export function thumbSvg(data,th,pad=30,st={}){const r=layout(JSON.parse(JSON.stringify(data)),th,st);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}
 export function themeThumb(th){const c=th.br, g=x=>readable(x,th.canvas,3), gb=`data-gbg="${th.canvas}"`;
   return `<svg viewBox="0 0 120 62" aria-hidden="true"><rect width="120" height="62" fill="${th.canvas}"/>
   ${[[18,16],[18,46],[102,16],[102,46]].map(([x,y],i)=>`<path d="M${x<60?48:72},31 C${x<60?36:84},31 ${x<60?36:84},${y} ${x<60?30:90},${y}" data-g="edge" ${gb} stroke="${g(th.line||c[i])}" stroke-width="2" fill="none"/>`).join('')}

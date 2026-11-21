@@ -75,7 +75,7 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   ok('theme change', await p.evaluate(()=>window.__mm.doc.theme)==='midnight');
   await p.keyboard.press('Control+z'); await W(100);
   // outline
-  await p.keyboard.press('Control+o'); await W(200); ok('outline view', await p.locator('.olrow').count()>=5);
+  await p.keyboard.press('Control+o'); await W(200); ok('outline view', await p.locator('.olr').count()>=5);
   await p.screenshot({path:SHOTS+'/04-outline.png'});
   await p.keyboard.press('Control+o'); await W(200);
   // shortcuts
@@ -125,7 +125,7 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
     await p.click('#md-ok'); await W(500);
     let t=await tr();
     ok('dialog creates map: H1 → root, H2 → branches', t.t==='名古屋旅行'&&t.c.map(x=>x.t).join()==='行程,美食'&&t.c[0].c[0].c.length===2, JSON.stringify(strip(t)).slice(0,200));
-    ok('tasks → done, inline md stripped, link + quote kept in note', t.c[0].c[0].c[1].done===true&&t.c[1].c[1].t==='鰻魚飯 官網'&&/example\.com/.test(t.c[1].c[1].note||'')&&/要排隊/.test(t.c[1].c[1].note||''), JSON.stringify(t.c[1].c[1]));
+    ok('tasks → done, inline md stripped, link → link field, quote → note', t.c[0].c[0].c[1].done===true&&t.c[1].c[1].t==='鰻魚飯 官網'&&/example\.com/.test(t.c[1].c[1].link||'')&&/要排隊/.test(t.c[1].c[1].note||''), JSON.stringify(t.c[1].c[1]));
     // synthetic paste on the canvas, under the selected node
     await pick('美食'); const u0=await p.evaluate(()=>window.__mm.undo.length);
     let r=await synth('paste',{'text/plain':'- 手羽先\n- 台灣拉麵\n  - 辣\n- 小倉吐司'});
@@ -414,7 +414,7 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
   await p.keyboard.press('Escape'); await W(150);
   ok('Esc closes search, focus back to canvas, highlights gone', await p.locator('#findbar').count()===0&&await p.evaluate(()=>document.activeElement.id==='cv')&&await p.locator('#mapsvg rect.findhit').count()===0);
   ok('searching adds no undo steps', await p.evaluate(()=>window.__mm.undo.length)===u0);
-  await p.keyboard.press('?'); await W(150); const kbt=await p.locator('.dlg').textContent(); ok('shortcuts dialog lists Ctrl+F, F3 and the version', kbt.includes('Ctrl+F')&&kbt.includes('F3')&&kbt.includes('v1.3.0')); await p.keyboard.press('Escape'); await W(100);
+  await p.keyboard.press('?'); await W(150); const kbt=await p.locator('.dlg').textContent(); ok('shortcuts dialog lists Ctrl+F, F3 and the version', kbt.includes('Ctrl+F')&&kbt.includes('F3')&&/v\d+\.\d+\.\d+/.test(kbt)); await p.keyboard.press('Escape'); await W(100);
   await p.keyboard.press('F3'); await W(100); ok('F3 opens search too', await p.locator('#findbar').count()===1); await p.keyboard.press('Escape'); await W(100);
   await p.click('.tb [data-act="find"]'); await W(100); ok('toolbar 搜尋 button opens search', await p.locator('#findbar').count()===1); await p.click('[data-act="findClose"]'); await W(100);
   // export menu: PNG / SVG / PDF
