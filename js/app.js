@@ -69,7 +69,7 @@ function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main')
   if(S.view==='list'){ shellKey=''; main.innerHTML=V.home(S,maps.index(),id=>maps.load(id)); $('#skip').href='#content'; $('#skip').textContent='跳到內容'; }
   else if(S.view==='editor'){ $('#skip').href='#cv'; $('#skip').textContent='跳到畫布';
     const key=[S.mapId,S.panel,S.outline,isM(),S.minimap,S.hints,S.aibar,!!S.preview].join('|');
-    if(key!==shellKey){ main.innerHTML=V.editorShell(S,S.doc,curName()); main.style.setProperty('--cv-main',th().canvas); shellKey=key; bindStage(); drawAll(true); }
+    if(key!==shellKey){ if(S.editing) commitEdit(); main.innerHTML=V.editorShell(S,S.doc,curName()); main.style.setProperty('--cv-main',th().canvas); shellKey=key; bindStage(); drawAll(true); }
     else drawAll(); }
   drawDialog(); }
 const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
@@ -135,15 +135,29 @@ function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits
   drawAll(); centerOn(id); updateFindCount(); }
 function select(id,{scroll=true}={}){ S.sel=id; drawAll(); if(scroll) ensureVisible(id); }
 // ---------- inline edit ----------
+let edEl=null, editAt=0, tapOpened=0, resizePending=false, lastPT='mouse';
+const dbg=m=>{ if(window.__mmDbg) window.__mmDbg(m); };
+function keepEditorInView(){ const ta=edEl, st=$('#stage'); if(!ta||!st||!S.editing||!S.vp) return; const vv=window.visualViewport, bottom=vv?vv.offsetTop+vv.height:innerHeight, r=ta.getBoundingClientRect(), top=isM()?72:8, M=12; let dy=0;
+  if(r.bottom>bottom-M) dy=bottom-M-r.bottom; if(r.top+dy<top) dy=top-r.top; if(dy){ S.vp={...S.vp,ty:S.vp.ty+dy}; applyVp(); } }
+function afterEdit(){ if(!resizePending) return; resizePending=false; clearTimeout(rT); rT=setTimeout(()=>{ if(!S.editing){ shellKey=''; render(); } },200); }
+// compat mouse events from a phone tap arrive ~300 ms later; right after the editor opened they must not move focus or act
+document.addEventListener('pointerdown',e=>{ lastPT=e.pointerType||'mouse'; },true);
+['mousedown','mouseup','click'].forEach(t=>document.addEventListener(t,e=>{ if(!S.editing||!edEl||Date.now()-editAt>800||edEl.contains(e.target)) return;
+  const touchy=(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents)||lastPT!=='mouse'; if(!touchy) return; e.preventDefault(); e.stopPropagation(); dbg(t+' ignored (just opened editor)'); },true));
 function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
   S.editing={id,isNew,orig:find(S.doc.root,id).n.t}; ensureVisible(id); const o=$('#ovl'); o.querySelector('.editbox')?.remove();
-  const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; o.appendChild(ta); positionEditor(); ta.focus(); ta.select();
+  const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; ta.setAttribute('enterkeyhint','done'); o.appendChild(ta); edEl=ta; editAt=Date.now(); positionEditor(); ta.focus({preventScroll:true}); ta.select(); dbg('editor open #'+id+(navigator.userActivation?' activation='+navigator.userActivation.isActive:''));
   ta.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.isComposing||e.keyCode===229) return;
     if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();commitEdit();$('#cv').focus();}
     else if(e.key==='Escape'){e.preventDefault();cancelEdit();}
     else if(e.key==='Tab'){e.preventDefault();commitEdit();if(e.shiftKey)outdent();else addChild();} });
   ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';});
-  ta.addEventListener('blur',()=>setTimeout(()=>{ if(S.editing&&S.editing.id===id&&document.activeElement!==ta) commitEdit(); },0)); }
+  // v1.3.3: commit on blur only when focus truly went somewhere else. Android blurs transiently while Gboard opens,
+  // when the app/notification shade takes focus, or when a stray compat event lands on the canvas → refocus instead.
+  ta.addEventListener('blur',()=>setTimeout(()=>{ if(!S.editing||S.editing.id!==id||edEl!==ta) return; const a=document.activeElement; if(a===ta) return;
+    const nowhere=!a||a===document.body||a.id==='cv'||a.id==='main'||a.id==='stage'||a.id==='app', away=document.hidden||!document.hasFocus();
+    if(ta.isConnected&&(away||nowhere&&Date.now()-editAt<1500)){ dbg('editor blur ignored ('+(away?'page not focused':'transient')+') → refocus'); if(!away) ta.focus({preventScroll:true}); return; }
+    dbg('editor blur → commit'); commitEdit(); },200)); }
 // phones: a small floating bar over the selected node — ✏️ 編輯 opens the editor from a real tap (keyboard shows), ⋯ the node menu
 function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector('.nodetb'); const n=lay&&S.sel&&lay.by.get(S.sel);
   if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.view!=='editor'){ tb&&tb.remove(); return; }
@@ -151,10 +165,10 @@ function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector(
   const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, W=o.clientWidth||innerWidth, w=tb.offsetWidth||140; let x=Math.max(8,Math.min(W-w-8,cx-w/2)), y=top-54; if(y<64) y=ty+(n.y+n.h/2)*sc+10;
   tb.style.left=x+'px'; tb.style.top=y+'px'; }
 function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
-  const fs=n.d===0?22:n.d===1?16:14; Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
-function commitEdit(){ const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; ta.remove();
-  if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); }
-function cancelEdit(){ const ta=document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; ta&&ta.remove(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
+  const fs=n.d===0?22:n.d===1?16:14; Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(isM()?16:14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
+function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
+  if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); afterEdit(); }
+function cancelEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; edEl=null; ta&&ta.remove(); dbg('editor cancel'); afterEdit(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
 // ---------- stage pointer handling ----------
 function nodeAt(e){ let t=e.target; if(t&&t.id==='stage'||t&&t.closest&&!t.closest('#mapsvg')){ const h=document.elementFromPoint(e.clientX,e.clientY); if(h) t=h; } const g=t&&t.closest&&t.closest('g.node'); return g?g.dataset.id:null; }
 function stagePoint(e){ const r=$('#stage').getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
@@ -176,10 +190,11 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
       if(drag&&drag.moved){ const [wx,wy]=worldAt(x,y); let t=null; for(const n of lay.by.values()){ if(n.id!==drag.id&&n.x!==undefined&&Math.abs(wx-n.x)<=n.w/2+6&&Math.abs(wy-n.y)<=n.h/2+6){t=n;break;} }
         const where=t?(wy<t.y-t.h/4&&t.d>0?'before':wy>t.y+t.h/4&&t.d>0?'after':'child'):null; drag.t=t&&t.id; drag.where=where; if(S.drop!==drag.t){S.drop=drag.t; drawMap();} showGhost(x,y,drag); } } });
   const end=e=>{ if(!pts.has(e.pointerId)) return; pts.delete(e.pointerId); clearTimeout(lp); if(pts.size<2&&pinch){ pinch=null; drawMap(); return; }
-    if(pan){ if(!pan.moved&&!e.target.closest('g.node')){ /* click on empty canvas */ } if(pan.moved) drawMap(); pan=null; }
+    if(pan){ if(!pan.moved&&S.editing&&Date.now()-editAt>400){ commitEdit(); if(!isM()) $('#cv').focus({preventScroll:true}); } if(pan.moved) drawMap(); pan=null; }
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
-      else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')) startEdit(d.id); /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
+      else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')){ startEdit(d.id); if(e.pointerType==='touch') tapOpened=Date.now(); } /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
+  st.addEventListener('touchend',e=>{ if(Date.now()-tapOpened<400){ e.preventDefault(); dbg('touchend cancelled (tap opened editor)'); } },{passive:false});
   st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
   st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
   st.addEventListener('wheel',e=>{ e.preventDefault(); const [x,y]=stagePoint(e); if(e.ctrlKey||e.metaKey) zoomAt(Math.exp(-e.deltaY*.01),x,y); else { S.vp={...S.vp,tx:S.vp.tx-(e.shiftKey?e.deltaY:e.deltaX),ty:S.vp.ty-(e.shiftKey?0:e.deltaY)}; applyVp(); } },{passive:false});
@@ -390,7 +405,7 @@ const stripIds=n=>{ const {id,...r}=n; if(r.c) r.c=r.c.map(stripIds); return r; 
 const countNodes=ns=>ns.reduce((a,n)=>a+allDeep(n).length,0);
 function clipPayload(n,asRoot){ return {md:IO.toMarkdown(n,{asRoot}),html:IO.toClipboardHTML(n,asRoot)}; }
 function copyMsg(n){ return `已複製「${n.t}」為 Markdown（${allDeep(n).length} 個節點）`; }
-function refocusCanvas(){ const cv=$('#cv'); if(cv&&document.activeElement&&(document.activeElement.id==='pastebin'||document.activeElement===document.body)) cv.focus({preventScroll:true}); }
+function refocusCanvas(){ if(S.editing) return; const cv=$('#cv'); if(cv&&document.activeElement&&(document.activeElement.id==='pastebin'||document.activeElement===document.body)) cv.focus({preventScroll:true}); }
 // menu-triggered copy: select a hidden textarea and run the copy command inside the click, so it also works on iOS
 function copyPayload(p,msg){ const ta=pastebin(); CLIP={...p,msg}; ta.value=p.md; ta.focus({preventScroll:true}); ta.select(); let ok=false; try{ ok=document.execCommand('copy'); }catch{} const used=CLIP===null; CLIP=null; refocusCanvas();
   if(ok&&used) return; if(ok) return toast(msg);
@@ -561,12 +576,19 @@ document.addEventListener('change',e=>{ const t=e.target; if(t.dataset.input==='
 document.addEventListener('keydown',e=>{ // roving tabindex for tablists
   const t=e.target; if(t.getAttribute&&t.getAttribute('role')==='tab'&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){ const tabs=[...t.closest('[role=tablist]').querySelectorAll('[role=tab]')]; let i=tabs.indexOf(t); i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length; e.preventDefault(); e.stopPropagation(); tabs[i].click(); }
   if(t.matches&&t.matches('.hist li[role=button]')&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); t.click(); } },true);
-let rT; addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ shellKey=''; render(); },150); });
+// v1.3.3: the phone keyboard resizes the page. Re-rendering then would remove the open editor → Android closes the
+// keyboard at once. While editing: only re-position the editor and keep it above the keyboard; re-layout after editing.
+let rT; function onResize(src){ dbg('resize('+src+') '+innerWidth+'×'+innerHeight+(window.visualViewport?' vv '+Math.round(visualViewport.width)+'×'+Math.round(visualViewport.height):'')+(S.editing?' [editing: no re-render]':''));
+  if(S.editing){ resizePending=true; positionEditor(); keepEditorInView(); return; }
+  if(src!=='window') return; clearTimeout(rT); rT=setTimeout(()=>{ if(S.editing){ resizePending=true; return; } resizePending=false; shellKey=''; render(); },150); }
+addEventListener('resize',()=>onResize('window'));
+if(window.visualViewport) visualViewport.addEventListener('resize',()=>onResize('visualViewport'));
 addEventListener('hashchange',route);
 // boot
 // ---------- PWA (v1.3): offline shell, install prompt, update prompt ----------
 const PWA={prompt:null,reg:null,reloading:false,later:false,newVersion:''};
 window.__mmVersion=VERSION;
+if(/[?&]debug=focus\b/.test(location.search)) import('./debug.js').then(m=>m.install(VERSION)).catch(()=>{});
 window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); PWA.prompt=e; S.canInstall=true; if(S.view==='list') render(); });
 window.addEventListener('appinstalled',()=>{ PWA.prompt=null; S.canInstall=false; if(S.view==='list') render(); toast('已安裝 MyMind，可以從主畫面開啟'); });
 function showUpdate(){ if(PWA.later||$('#updbar')) return; document.body.insertAdjacentHTML('beforeend',V.updateBar(PWA.newVersion)); }
