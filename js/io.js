@@ -1,6 +1,7 @@
 // Import / export: Markdown outline, OPML, .mymind.json, PNG/SVG.
 import { newId } from './store.js';
 import { markText } from './core.js';
+import { smOf, bdOf, rangeIdx } from './extras.js';
 const withIds=n=>({id:newId(),t:n.t,...(n.note?{note:n.note}:{}),...(n.c&&n.c.length?{c:n.c.map(withIds)}:{})});
 // ---------- Markdown ----------
 // Inline markdown → plain node text. Links keep their text; URLs are returned so the caller can keep them (in the note).
@@ -40,7 +41,12 @@ export function parseMarkdown(md,{links:linkMode='field'}={}){
     if(!listInd.length||listInd[listInd.length-1]<ind) listInd.push(ind);
     push(head+listInd.length,mk(text,extra)); }
   return tops; }
-const withIdsDeep=n=>({...n,id:newId(),...(n.c&&n.c.length?{c:n.c.map(withIdsDeep)}:{})});
+const withIdsDeep=n=>{ const id=newId(), c=n.c&&n.c.length?n.c.map(withIdsDeep):null, M=new Map((n.c||[]).map((o,i)=>[o.id,c[i].id])), out={...n,id,...(c?{c}:{})};
+  // v1.9: 概要 topics get fresh ids and 概要／外框 ranges follow the renamed children
+  if(Array.isArray(n.sm)) out.sm=n.sm.map(s=>({...withIdsDeep(s),a:M.get(s.a)||s.a,b:M.get(s.b)||s.b}));
+  if(Array.isArray(n.bd)) out.bd=n.bd.map(b=>({...b,id:newId(),a:b.a===n.id?id:(M.get(b.a)||b.a),b:b.b===n.id?id:(M.get(b.b)||b.b)}));
+  return out; };
+export const reId=n=>withIdsDeep(JSON.parse(JSON.stringify(n)));
 // Markdown → a whole map: root = the single top item, or the first H1 / first line with everything else under it.
 export function fromMarkdown(md,o){ const tops=parseMarkdown(md,o); if(!tops.length) throw new Error('沒有內容');
   let root; if(tops.length===1) root=tops[0];
@@ -58,8 +64,11 @@ function lineOf(n){ const txt=escLine(n.t); const body=n.link?`[${txt.replace(/\
 let OUT=null; function extras(n,ind){ if(n.img&&/^https?:/i.test(n.img.src)) OUT.push(`${ind}![${(n.img.alt||'').replace(/[\[\]]/g,'')}](${n.img.src})`); if(n.note) OUT.push(...noteLines(n.note,ind)); }
 // Map/subtree → Markdown. Root: "# title"; descendants: nested "- " lists (2 spaces), done → "- [x]", notes → "> " lines.
 export function toMarkdown(node,{asRoot=true}={}){ const out=[]; OUT=out;
-  const item=(c,lv)=>{ out.push(`${'  '.repeat(lv)}- ${c.done?'[x] ':''}${lineOf(c)}`); extras(c,'  '.repeat(lv+1)); (c.c||[]).forEach(k=>item(k,lv+1)); };
-  if(asRoot){ out.push(`# ${lineOf(node)}`); extras(node,''); out.push(''); (node.c||[]).forEach(c=>item(c,0)); }
+  // v1.9: a 外框 is noted on the first node it surrounds; a 概要 follows the last node of its range as 〔概要〕, with its own children
+  const bdNote=(host,c)=>bdOf(host).filter(b=>b.a!==host.id&&(rangeIdx(host,b.a,b.b)||[-1])[0]===(host.c||[]).indexOf(c)).map(b=>{ const r=rangeIdx(host,b.a,b.b); return `（外框${b.t?'：'+escLine(b.t):''}，${r[1]-r[0]+1} 項）`; }).join('');
+  const kidsOf=(n,lv)=>{ const k=n.c||[]; k.forEach((c,i)=>{ item(c,lv,bdNote(n,c)); smOf(n).filter(s=>(rangeIdx(n,s.a,s.b)||[-1,-1])[1]===i).forEach(s=>item(s,lv,'','〔概要〕')); }); };
+  const item=(c,lv,note='',pre='')=>{ out.push(`${'  '.repeat(lv)}- ${c.done?'[x] ':''}${pre}${lineOf(c)}${note}`); extras(c,'  '.repeat(lv+1)); kidsOf(c,lv+1); };
+  if(asRoot){ out.push(`# ${lineOf(node)}${bdOf(node).some(b=>b.a===node.id)?'（整張圖有外框）':''}`); extras(node,''); out.push(''); kidsOf(node,0); }
   else item(node,0);
   return out.join('\n')+'\n'; }
 // Subtree → simple HTML list (for pasting into docs), carrying the exact MyMind JSON for lossless paste back.

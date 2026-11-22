@@ -1,9 +1,9 @@
 // MyMind service worker: offline app shell. Every release bumps VERSION, which creates a fresh cache;
 // the page then shows 「有新版本，重新整理」 and switches only when the user taps it.
-const VERSION='1.8.1';
+const VERSION='1.9.0';
 const CACHE='mymind-'+VERSION;
 const SHELL=['./','index.html','view.html','manifest.webmanifest','css/app.css','css/classic-fonts.css','css/viewer.css',
-  'js/app.js','js/ai.js','js/classic.js','js/core.js','js/debug.js','js/gdrive.js','js/github.js','js/io.js','js/mapview.js','js/merge.js','js/share.js','js/store.js','js/version.js','js/viewer.js','js/views.js',
+  'js/app.js','js/ai.js','js/classic.js','js/core.js','js/extras.js','js/debug.js','js/gdrive.js','js/github.js','js/io.js','js/mapview.js','js/merge.js','js/share.js','js/store.js','js/version.js','js/viewer.js','js/views.js',
   'icons/icon.svg','icons/icon-192.png','icons/icon-512.png','icons/maskable-192.png','icons/maskable-512.png','icons/apple-touch-icon.png'];
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL.map(u=>new Request(u,{cache:'reload'}))))); });
 self.addEventListener('activate',e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('mymind-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });

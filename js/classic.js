@@ -99,6 +99,7 @@ function size(n,d,br,par,S){
   const W0=cw+2*px, H=ch+2*py; n.arc=s.shape==='arc-sides-rect';
   n.w=n.arc?W0-py/2+H/2:W0; n.h=H; n.padX=px; n.padY=py; n.cw=cw; n.ch=ch; n.fold=foldOf(s);
   (n.c||[]).forEach((c,i)=>size(c,d+1,d===0?i:br,n,S));
+  if(Array.isArray(n.sm)) n.sm.forEach(sm=>{ if(sm&&sm.id) size(sm,d+1,d===0?Math.max(0,(n.c||[]).findIndex(c=>c.id===sm.a)):br,n,S); });
 }
 function anchor(ys){ const t=(ys[0]+ys[ys.length-1])/2; if(ys.length<=2) return t;
   let i=Infinity,o=null; for(let c=1;c<ys.length-1;c++){ const n=Math.abs(ys[c]-t); if(!(n<i)) break; i=n; o=ys[c]; }
@@ -109,13 +110,17 @@ const mV=s=>s.m[0], mH=s=>s.m.length>1?s.m[1]:s.m[0];
 // vertical extents include the stroke fold (an underline only has it below); children line up on their in points
 // (box centre, or the underline) and the group is anchored on the parent's out point
 const ulOf=n=>n.st&&n.st.shape==='underline';
-function stackList(n,k){ let y=0, prev=null; const ys=[];
-  k.forEach(c=>{ if(prev) y+=Math.max(prev.mv,c.mv); c.ry=y-c.top; ys.push(c.ry+c.inY); y=c.ry+c.bot; prev=c; });
+function stackList(n,k){ let y=0, prev=null; const ys=[], P=n._pads, all=kids(n);
+  k.forEach(c=>{ const i=all.indexOf(c); if(prev) y+=Math.max(prev.mv,c.mv); if(P) y+=P.pb[i]; c.ry=y-c.top; ys.push(c.ry+c.inY); y=c.ry+c.bot+(P?P.pa[i]:0); prev=c; });
   const an=anchor(ys); let top=n.otop, bot=n.obot;
   k.forEach(c=>{ c.ry+=offOf(c).y-an+n.outY; top=Math.min(top,c.ry+c.top); bot=Math.max(bot,c.ry+c.bot); }); return {top,bot}; }
 function stack(n){ const k=kids(n); n.mv=mV(n.st)+(k.length?4:0);
   n.inY=n.outY=ulOf(n)?n.h/2:0; n.otop=-n.h/2-(ulOf(n)?0:n.fold); n.obot=n.h/2+n.fold;
-  k.forEach(stack);
+  k.forEach(stack); n._pads=null;
+  if(Array.isArray(n.sm)&&k.length){ const pb=k.map(()=>0), pa=k.map(()=>0); // 概要 taller than its range: open room around the range
+    for(const sm of n.sm){ if(!sm||!sm.id||sm.w===undefined) continue; const i=k.findIndex(c=>c.id===sm.a), j=k.findIndex(c=>c.id===sm.b); if(i<0||j<0) continue; const a=Math.min(i,j), b=Math.max(i,j);
+      stack(sm); let h=0; for(let q=a;q<=b;q++) h+=(k[q].bot-k[q].top)+(q>a?Math.max(k[q-1].mv,k[q].mv):0); const e=(sm.bot-sm.top)-h; if(e>0){ pb[a]+=e/2; pa[b]+=e/2; } }
+    if(pb.some(Boolean)||pa.some(Boolean)) n._pads={pb,pa}; }
   if(!k.length){ n.top=n.otop; n.bot=n.obot; return; }
   if(n.d===0&&n.mind){ const R=k.filter(c=>c.side!==-1), Lf=k.filter(c=>c.side===-1); let top=n.otop, bot=n.obot;
     [R,Lf].forEach(g=>{ if(!g.length) return; const b=stackList(n,g); top=Math.min(top,b.top); bot=Math.max(bot,b.bot); }); n.top=top; n.bot=bot; return; }
@@ -124,6 +129,9 @@ export const stubOf=s=>Math.max(mH(s)*.333,13);
 export const gapOf=(p,c)=>Math.max(mH(p.st),stubOf(p.st)+13)+p.fold+c.fold;
 function place(n,x,y){ n.x=x; n.y=y; kids(n).forEach(c=>{ const sg=c.side===-1?-1:1; place(c,x+sg*(n.w/2+gapOf(n,c)+c.w/2+offOf(c).x),y+c.ry); }); }
 function setSide(n,s){ n.side=s; (n.c||[]).forEach(c=>setSide(c,s)); }
+// v1.9 概要: size a summary topic like a sibling of its range, then lay its own subtree out from its centre
+export function clSum(s,d,br,host,root){ size(s,d,br,host,root.spec||specOf(root)); }
+export function clSumPlace(s,x,y,side){ setSide(s,side===-1?-1:1); stack(s); place(s,x,y); }
 export function clLayout(root){ const S=specOf(root); size(root,0,0,null,S);
   const k=root.c||[]; root.mind=S.layout==='mind';
   if(root.mind){ const cut=Math.min(k.length,root.split!=null?+root.split:Math.ceil(k.length/2)); k.forEach((c,i)=>setSide(c,i<cut?1:-1)); }

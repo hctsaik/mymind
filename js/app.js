@@ -1,6 +1,7 @@
 // MyMind app: state, routing, editor interactions, sync. Plain ES modules, no build step.
 import { I, esc, THEMES, DEFAULT_THEME, readable, lum, cr, mix } from './core.js';
 import { layout, renderMap, all, allDeep, kids, bounds, countDesc, colorOf, relsOf } from './mapview.js';
+import { smOf, bdOf, rangeIdx, pruneExtras, BD_COLORS } from './extras.js';
 import { prefs, secrets, maps, newId, storage } from './store.js';
 import { client, GitHubError, blobSha } from './github.js';
 import * as GD from './gdrive.js';
@@ -18,7 +19,8 @@ const S={view:'list',filter:'all',q:'',sideQ:'',sort:'updated',mapId:null,doc:nu
 window.__mm=S; // for tests/debugging (contains no secrets)
 const ensureIds=n=>{if(!n.id)n.id=newId();(n.c||[]).forEach(ensureIds);return n;};
 const clone=o=>JSON.parse(JSON.stringify(o));
-function find(root,id,par=null,idx=0){ if(root.id===id) return {n:root,parent:par,idx}; for(let i=0;i<(root.c||[]).length;i++){const r=find(root.c[i],id,root,i); if(r) return r;} return null; }
+function find(root,id,par=null,idx=0){ if(root.id===id) return {n:root,parent:par,idx}; for(let i=0;i<(root.c||[]).length;i++){const r=find(root.c[i],id,root,i); if(r) return r;}
+  for(const sm of smOf(root)){ const r=find(sm,id,null,-1); if(r){ if(r.n===sm) r.host=root; return r; } } return null; } // a 概要 topic has no parent: f.host is the node it summarises under
 const thBase=()=>THEMES[(S.doc&&S.doc.theme)||DEFAULT_THEME]||THEMES[DEFAULT_THEME];
 // faithful imports (classic engine) carry their own canvas colour in root.gs.bg; every other map/theme is unchanged
 const thGs=new WeakMap(); const th=()=>{ const T=thBase(), g=S.doc&&S.doc.root&&S.doc.root.gs; if(!g||!g.bg||T.engine!=='classic') return T; let c=thGs.get(g); if(!c||c.T!==T){ c={T,v:{...T,canvas:g.bg}}; thGs.set(g,c); } return c.v; };
@@ -26,7 +28,7 @@ const cvBgImg=()=>{ const g=S.doc&&S.doc.root&&S.doc.root.gs; return g&&g.bgImg&
 const isM=V.isMobile;
 let toastT;
 function toast(msg,act){ let t=$('#toast'); if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t);}
-  t.innerHTML=`<span>${esc(msg)}</span>${act?`<button class="btn" data-act="${act[1]}">${esc(act[0])}</button>`:''}`; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),act?8000:3500); }
+  t.innerHTML=`<span>${esc(msg)}</span>${act?`<button class="btn" data-act="${act[1]}"${act[2]?` data-v="${esc(act[2])}"`:''}>${esc(act[0])}</button>`:''}`; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),act?8000:3500); }
 // ---------- UI prefs ----------
 function applyUi(){ const p=prefs.get(); const dark=p.ui==='dark'||(p.ui==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.ui=dark?'dark':'light'; document.documentElement.classList.toggle('reduce-motion',!!p.reduceMotion); S.lines=p.lines; }
@@ -39,24 +41,53 @@ function storeDoc(doc,{dirty=true}={}){ maps.save(doc.id,doc); maps.setMeta(doc.
 function createMap(root,{open=true,theme}={}){ const doc=newDoc(root,theme); storeDoc(doc); changed(); askPersist(); if(open) location.hash='#/map/'+doc.id; return doc; }
 // ---------- mutations / undo ----------
 function mutate(fn,{select,keepRedo}={}){ if(!S.doc||S.preview) return; S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>200)S.undo.shift(); if(!keepRedo)S.redo=[];
-  fn(S.doc.root); pruneRels(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
+  fn(S.doc.root); pruneRels(S.doc.root); pruneExtras(S.doc.root); if(select!==undefined) S.sel=select; touch(); }
 // relationship lines whose ends no longer exist are dropped with the same undo step that removed the node
 function pruneRels(r){ if(!r.rels) return; const ids=new Set(allDeep(r).map(n=>n.id)); r.rels=r.rels.filter(x=>x&&x.a!==x.b&&ids.has(x.a)&&ids.has(x.b)); if(!r.rels.length) delete r.rels; }
 function touch(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S.sync.state=remote()?'dirty':'saved'; changed(); drawAll(); }
 function undo(){ if(!S.undo.length) return toast('沒有可以復原的動作'); S.redo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.undo.pop()); if(S.sel&&!find(S.doc.root,S.sel)) S.sel=S.doc.root.id; touch(); }
 function redo(){ if(!S.redo.length) return toast('沒有可以重做的動作'); S.undo.push(JSON.stringify(S.doc.root)); S.doc.root=JSON.parse(S.redo.pop()); touch(); }
 const selInfo=()=>S.doc&&S.sel?find(S.doc.root,S.sel):null;
+// ---------- v1.9 multi-select (Shift/Ctrl-click, or 多選 mode on phones) ----------
+const selIds=()=>{ const m=(S.msel||[]).filter(id=>find(S.doc.root,id)); return m.length?m:(S.sel?[S.sel]:[]); };
+function clearMulti(draw=true){ const had=(S.msel&&S.msel.length)||S.mselMode; S.msel=[]; S.mselMode=false; if(had&&draw) drawAll(); }
+function toggleMulti(id){ const m=new Set((S.msel&&S.msel.length)?S.msel:(S.sel&&S.sel!==id?[S.sel]:[]));
+  if(m.has(id)){ m.delete(id); if(S.sel===id) S.sel=[...m].pop()||id; } else { m.add(id); S.sel=id; }
+  S.msel=[...m]; S.selRel=null; drawAll(); }
+// contiguous siblings → {host,a,b}; a lone root → the root itself (外框 only)
+function siblingRange(ids){ const fs=ids.map(id=>find(S.doc.root,id)).filter(Boolean); if(!fs.length) return {err:'先選一個節點'};
+  if(fs.length===1&&!fs[0].parent) return fs[0].host?{err:'概要主題不能再加概要或外框，請選它的子主題'}:{root:true,host:fs[0].n};
+  if(fs.some(f=>!f.parent)) return {err:fs.some(f=>f.host)?'概要主題不能和其他節點一起框選':'中心主題不能和其他節點一起框選'};
+  const P=fs[0].parent; if(fs.some(f=>f.parent!==P)) return {err:'請選同一層、相鄰的節點'};
+  const ix=fs.map(f=>f.idx).sort((a,b)=>a-b); if(ix[ix.length-1]-ix[0]!==ix.length-1) return {err:'請選相鄰的節點（中間不能空一個）'};
+  return {host:P,a:P.c[ix[0]].id,b:P.c[ix[ix.length-1]].id}; }
+function addSummary(){ const R0=siblingRange(selIds()); if(R0.err) return toast(R0.err); if(R0.root) return toast('中心主題不能加概要；請選它底下的節點');
+  const t={id:newId(),t:'概要',a:R0.a,b:R0.b}; mutate(r=>{ const h=find(r,R0.host.id).n; h.sm=h.sm||[]; h.sm.push(t); },{select:t.id}); clearMulti(false); drawAll(); startEdit(t.id,true); }
+function addBoundary(){ const R0=selIds(), g=siblingRange(R0); if(g.err) return toast(g.err);
+  const e={id:newId(),a:g.root?g.host.id:g.a,b:g.root?g.host.id:g.b}; mutate(r=>{ const h=find(r,g.host.id).n; h.bd=h.bd||[]; h.bd.push(e); }); clearMulti(false); S.selBd=e.id; drawAll(); toast('已加外框',['加標籤','bdLabel',e.id]); }
+function bdFind(id){ for(const n of allDeep(S.doc.root)) for(const e of bdOf(n)) if(e.id===id) return {e,host:n}; return null; }
+function openBdMenu(id,x,y){ const B=bdFind(id); if(!B) return; S.selBd=id; S.sel=null; drawMap();
+  openMenu(`<div class="ctx bdmenu" role="menu" aria-label="外框"><div class="lphead">外框${B.e.t?'：'+esc(B.e.t):''}</div>${mi('bdLabel','edit',B.e.t?'改標籤':'加標籤','',id)}
+    <div class="bdcols" role="group" aria-label="外框顏色">${['',...BD_COLORS].map(c=>`<button role="menuitemradio" tabindex="-1" aria-checked="${(B.e.col||'')===c}" data-act="bdColor" data-v="${id}|${c}" aria-label="${c?'顏色 '+c:'跟分支同色'}" style="--c:${c||'transparent'}" class="bdc${c?'':' auto'}"></button>`).join('')}</div><hr>${mi('bdDel','trash','移除外框','del',id)}</div>`,$('#cv'),{x:x-130,y:y+12,yAbove:y-12}); }
+function openSmMenu(id,x,y){ const f=find(S.doc.root,id); if(!f) return; S.sel=id; drawAll();
+  openMenu(`<div class="ctx smmenu" role="menu" aria-label="概要"><div class="lphead">概要：${esc(f.n.t)}</div>${mi('edit','edit','編輯概要文字')}${mi('addChild','child','新增子主題')}${mi('quickStyle','palette','快速樣式')}<hr>${mi('delete','trash','移除概要','del')}</div>`,$('#cv'),{x:x-130,y:y+12,yAbove:y-12}); }
 function addChild(edit=true){ const f=selInfo()||{n:S.doc.root}; const n={id:newId(),t:'新主題'}; mutate(r=>{const x=find(r,f.n.id).n; x.c=x.c||[]; x.collapsed=false; x.c.push(n);},{select:n.id}); if(edit) startEdit(n.id,true); }
-function addSibling(edit=true){ const f=selInfo(); if(!f||!f.parent) return addChild(edit); const n={id:newId(),t:'新主題'}; mutate(r=>{const p=find(r,f.parent.id).n; p.c.splice(find(r,f.n.id).idx+1,0,n);},{select:n.id}); if(edit) startEdit(n.id,true); }
+function addSibling(edit=true){ const f=selInfo(); if(f&&f.host) return toast('概要主題沒有同級；按 Tab 可以新增它的子主題'); if(!f||!f.parent) return addChild(edit); const n={id:newId(),t:'新主題'}; mutate(r=>{const p=find(r,f.parent.id).n; p.c.splice(find(r,f.n.id).idx+1,0,n);},{select:n.id}); if(edit) startEdit(n.id,true); }
 function outdent(){ const f=selInfo(); if(!f||!f.parent) return; const gp=find(S.doc.root,f.parent.id); if(!gp.parent) return toast('第一層節點不能再升一層');
   mutate(r=>{const a=find(r,f.n.id), p=find(r,f.parent.id); p.n.c.splice(a.idx,1); if(!p.n.c.length) delete p.n.c; p.parent.c.splice(p.idx+1,0,a.n);}); }
-function removeSel(){ const f=selInfo(); if(!f) return; if(!f.parent) return toast('中心主題不能刪除'); const next=(f.parent.c[f.idx+1]||f.parent.c[f.idx-1]||f.parent).id;
+function removeSel(){ const ids=selIds(); if(ids.length>1) return removeMany(ids); const f=selInfo(); if(!f) return;
+  if(f.host){ mutate(r=>{ const h=find(r,f.host.id).n; h.sm=(h.sm||[]).filter(x=>x.id!==f.n.id); if(!h.sm.length) delete h.sm; },{select:f.host.id}); return toast('已移除概要「'+f.n.t+'」',['復原','undo']); }
+  if(!f.parent) return toast('中心主題不能刪除'); const next=(f.parent.c[f.idx+1]||f.parent.c[f.idx-1]||f.parent).id;
   mutate(r=>{const a=find(r,f.n.id); a.parent.c.splice(a.idx,1); if(!a.parent.c.length) delete a.parent.c;},{select:next}); toast('已刪除「'+f.n.t+'」',['復原','undo']); }
-function moveNode(id,targetId,where){ if(id===targetId) return; const r0=S.doc.root, src=find(r0,id); if(!src||!src.parent) return; const tgt=find(r0,targetId); if(!tgt) return; if(find(src.n,targetId)) return toast('不能移到自己的子節點底下');
+function moveNode(id,targetId,where){ if(id===targetId) return; const r0=S.doc.root, src=find(r0,id); if(!src||!src.parent) return; const tgt=find(r0,targetId); if(!tgt) return; if(tgt.host) where='child'; if(find(src.n,targetId)) return toast('不能移到自己的子節點底下');
   if(where!=='child'&&!tgt.parent) where='child';
   mutate(r=>{const a=find(r,id); a.parent.c.splice(a.idx,1); if(!a.parent.c.length) delete a.parent.c; const t=find(r,targetId);
     if(where==='child'){t.n.c=t.n.c||[]; t.n.collapsed=false; t.n.c.push(a.n);} else {const i=find(r,targetId).idx; t.parent.c.splice(where==='before'?i:i+1,0,a.n);}},{select:id}); }
 function reorder(dir){ const f=selInfo(); if(!f||!f.parent) return; const j=f.idx+dir; if(j<0||j>=f.parent.c.length) return; mutate(r=>{const p=find(r,f.parent.id).n; const [x]=p.c.splice(f.idx,1); p.c.splice(j,0,x);}); }
+function removeMany(ids){ const fs=ids.map(id=>find(S.doc.root,id)).filter(f=>f&&(f.parent||f.host)); if(!fs.length) return toast('中心主題不能刪除');
+  const keep=fs.filter(f=>!fs.some(g=>g!==f&&find(g.n,f.n.id))); const cnt=keep.length; const P=keep[0].parent||keep[0].host;
+  mutate(r=>{ keep.forEach(f=>{ const a=find(r,f.n.id); if(!a) return; if(a.host){ a.host.sm=a.host.sm.filter(x=>x.id!==a.n.id); if(!a.host.sm.length) delete a.host.sm; } else { a.parent.c.splice(a.idx,1); if(!a.parent.c.length) delete a.parent.c; } }); },{select:find(S.doc.root,P.id)?P.id:S.doc.root.id});
+  clearMulti(false); drawAll(); toast(`已刪除 ${cnt} 個節點`,['復原','undo']); }
 function toggleCollapse(id){ const f=id?find(S.doc.root,id):selInfo(); if(!f||!f.n.c||!f.n.c.length) return; mutate(r=>{const x=find(r,f.n.id).n; x.collapsed=!x.collapsed;}); }
 function setLevel(l){ mutate(r=>{(function w(n,d){ if(n.c&&n.c.length){ n.collapsed=!!(l&&d>=l); n.c.forEach(c=>w(c,d+1)); } })(r,0);}); }
 // v1.8.1: 全部展開 / 全部收合 for the whole map (the root's first level stays visible) or one node's subtree; one undo step each
@@ -130,7 +161,7 @@ function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const
   if(!S.vp||first&&!S.vp) S.vp=initialView(lay.r); if(first&&S.vpFor!==S.mapId){S.vp=initialView(lay.r);S.vpFor=S.mapId;}
   const lod=S.vp.sc<.45&&all(lay.r).length>60;
   if(S.find){ S.find.hits=findHits(); if(S.find.i>=S.find.hits.length) S.find.i=0; }
-  const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod,selRel:S.selRel});
+  const {svg,b}=renderMap(lay.r,th(),{hits:S.find&&S.find.hits.length?new Set(S.find.hits):null,cur:S.find&&S.find.hits[S.find.i],sel:S.preview?null:S.sel,msel:S.preview||!(S.msel&&S.msel.length)?null:new Set(S.msel),selBd:S.selBd,lightLines:S.lines==='light',sc:S.vp.sc,edge:(doc.settings||{}).edge,lw:(doc.settings||{}).lw,mobile:isM(),drop:S.drop,lod,selRel:S.selRel});
   vp.innerHTML=svg; updRelBar(); S.bounds=b; applyVp(); drawOverview(lod); drawMinimap(svg,b);
   $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
 function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; clampRelLabels(); positionEditor(); updateMinimapVp(); }
@@ -162,6 +193,8 @@ function quietSave(){ S.doc.updated=new Date().toISOString(); storeDoc(S.doc); S
 let olT;
 function olVisible(){ return $$('.olin').map(e=>e.dataset.olid); }
 function olOp(op,id=S.olId){ if(!S.doc||S.preview||!id) return; const f=find(S.doc.root,id); if(!f) return; let focus=id, pos=null;
+  if(f.host){ if(op==='del'){ const vis=olVisible(), i=vis.indexOf(id); focus=vis[i-1]||f.host.id; mutate(r=>{ const h=find(r,f.host.id).n; h.sm=h.sm.filter(x=>x.id!==id); if(!h.sm.length) delete h.sm; },{select:focus}); toast('已移除概要',['復原','undo']); S.sel=focus; S.olFocus={id:focus,pos:null}; return drawAll(); }
+    if(op!=='add') return toast('概要跟著它框住的節點，不能縮排或移動'); }
   if(op==='add'){ const n={id:newId(),t:''}; mutate(r=>{ const g=find(r,id); if(!g.parent||(g.n.c&&g.n.c.length&&!g.n.collapsed)){ g.n.c=g.n.c||[]; g.n.c.unshift(n); delete g.n.collapsed; } else g.parent.c.splice(g.idx+1,0,n); },{select:n.id}); focus=n.id; }
   else if(op==='indent'){ if(!f.parent||f.idx===0) return toast('第一個子項目不能再縮排'); pos=$(`.olin[data-olid="${CSS.escape(id)}"]`)?.selectionStart; mutate(r=>{ const g=find(r,id), prev=g.parent.c[g.idx-1]; g.parent.c.splice(g.idx,1); prev.c=prev.c||[]; prev.c.push(g.n); delete prev.collapsed; }); }
   else if(op==='outdent'){ if(!f.parent||f.parent.id===S.doc.root.id) return toast(f.parent?'已經是第一層':'中心主題不能移動'); pos=$(`.olin[data-olid="${CSS.escape(id)}"]`)?.selectionStart; mutate(r=>{ const g=find(r,id), gp=find(r,g.parent.id); g.parent.c.splice(g.idx,1); gp.parent.c.splice(gp.idx+1,0,g.n); }); }
@@ -206,7 +239,7 @@ function centerOn(id){ const n=lay&&lay.by.get(id), st=$('#stage'); if(!n||!st) 
 function goFind(i){ const F=S.find; if(!F) return; F.hits=findHits(); if(!F.hits.length){ updateFindCount(); drawMap(); return; } F.i=((i%F.hits.length)+F.hits.length)%F.hits.length; const id=F.hits[F.i];
   if(!S.preview){ let p=find(S.doc.root,id), opened=false; while(p&&p.parent){ if(p.parent.collapsed){ delete p.parent.collapsed; opened=true; } p=find(S.doc.root,p.parent.id); } if(opened) touch(); S.sel=id; }
   drawAll(); centerOn(id); updateFindCount(); }
-function select(id,{scroll=true}={}){ S.sel=id; S.selRel=null; drawAll(); if(scroll) ensureVisible(id); }
+function select(id,{scroll=true}={}){ S.sel=id; S.selRel=null; S.selBd=null; if(!S.mselMode) S.msel=[]; drawAll(); if(scroll) ensureVisible(id); }
 // ---------- inline edit ----------
 let edEl=null, editAt=0, tapOpened=0, tapPt=[-999,-999], resizePending=false;
 const dbg=m=>{ if(window.__mmDbg) window.__mmDbg(m); };
@@ -232,8 +265,17 @@ function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id);
     if(ta.isConnected&&(away||nowhere&&Date.now()-editAt<1500)){ dbg('editor blur ignored ('+(away?'page not focused':'transient')+') → refocus'); if(!away) ta.focus({preventScroll:true}); return; }
     dbg('editor blur → commit'); commitEdit(); },200)); }
 // phones: a small floating bar over the selected node — ✏️ 編輯 opens the editor from a real tap (keyboard shows), ⋯ the node menu
+const multiOn=()=>!!(S.doc&&!S.preview&&!S.outline&&S.view==='editor'&&(S.mselMode||(S.msel&&S.msel.length>1)));
+// v1.9: the multi-select bar (count + what you can do with several nodes); bottom of the screen on phones, top of the canvas on desktop
+function drawMultiBar(){ const o=$('#ovl'); if(!o) return; let mb=o.querySelector('.multibar'); if(!multiOn()){ mb&&mb.remove(); return; }
+  const ids=selIds(), n=ids.length, rg=n?siblingRange(ids):{err:1}, ok=!rg.err, key=n+'|'+ok+'|'+(rg.root?1:0)+'|'+(S.qsClip?1:0);
+  if(mb&&mb.dataset.k===key) return; mb&&mb.remove();
+  const B=(a,i,l,dis,hint)=>`<button class="btn" data-act="${a}"${dis?` aria-disabled="true" title="${hint}"`:''}>${I(i)}<span>${l}</span></button>`;
+  o.insertAdjacentHTML('beforeend',`<div class="multibar" role="toolbar" aria-label="多選" data-k="${key}"><span class="mbcount" aria-live="polite"><b>${n}</b> 個已選</span>
+    ${B('quickStyle','palette','樣式',!n,'先選節點')}${B('summary','brace','概要',!ok||rg.root,'選同一層、相鄰的節點')}${B('boundary','frame','外框',!ok,'選同一層、相鄰的節點')}${B('multiDel','trash','刪除',!n,'先選節點')}
+    <button class="btn done" data-act="multiDone">${I('check')}<span>完成</span></button></div>`); }
 function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector('.nodetb'); const n=lay&&S.sel&&lay.by.get(S.sel);
-  if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.relPick||S.view!=='editor'){ tb&&tb.remove(); return; }
+  if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.relPick||S.view!=='editor'||multiOn()){ tb&&tb.remove(); return; }
   const kids=n.c&&n.c.length?(n.collapsed?'open':'fold'):'', key=kids;
   if(tb&&tb.dataset.k!==key){ tb.remove(); tb=null; }
   // v1.8: branches can be folded straight from this bar (the canvas also shows a − toggle on the selected node)
@@ -252,7 +294,7 @@ function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector(
   tb.classList.toggle('docked',best.c===undefined); tb.style.left=best.x+'px'; tb.style.top=Math.max(64,Math.min(H-h-8,best.y))+'px'; }
 // v1.8.1: the editor grows to show all of the text (long multi-line nodes used to be cut off after a few lines on phones),
 // wraps at a comfortable width, and only scrolls inside past the space left above the on-screen keyboard (visualViewport)
-function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
+function positionEditor(){ drawNodeTb(); drawMultiBar(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
   const st=$('#stage'), sr=st?st.getBoundingClientRect():{left:0,top:0,width:innerWidth,height:innerHeight}, W=sr.width||innerWidth, m=isM(), E=12;
   const fs=Math.max(m?16:14,(n.fs||(n.d===0?22:n.d===1?16:14))*sc), nw=n.w*sc, maxW=Math.max(120,W-2*E);
   const w=Math.min(maxW,Math.max(120,nw,m?Math.min(280,maxW):0)); let left=tx+(n.x-n.w/2)*sc; if(nw<w) left-=(w-nw)/2; left=Math.max(E,Math.min(W-E-w,left));
@@ -260,8 +302,10 @@ function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .
   sizeEditor(ta); }
 function editorRoom(){ const vv=window.visualViewport, st=$('#stage'), sr=st?st.getBoundingClientRect():{top:0}, top=Math.max(sr.top,0)+(isM()?72:8), bottom=(vv?vv.offsetTop+vv.height:innerHeight)-12; return Math.max(80,bottom-top); }
 function sizeEditor(ta){ ta.style.height='auto'; const need=ta.scrollHeight+2, max=editorRoom(), h=Math.min(need,max); ta.style.height=h+'px'; ta.style.overflowY=need>max?'auto':'hidden'; }
-function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
-  if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); afterEdit(); }
+function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig, isNew=S.editing.isNew; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
+  // a node created for typing (子主題, 同級, 概要) and its first text are one undo step
+  if(!find(S.doc.root,id)) { drawMap(); return afterEdit(); }
+  if(v!==orig){ const x=isNew&&S.undo.length?find(S.doc.root,id):null; if(x){ x.n.t=v; S.redo=[]; touch(); } else mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); afterEdit(); }
 function cancelEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; edEl=null; ta&&ta.remove(); dbg('editor cancel'); afterEdit(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
 // ---------- stage pointer handling ----------
 function nodeAt(e){ let t=e.target; if(t&&t.id==='stage'||t&&t.closest&&!t.closest('#mapsvg')){ const h=document.elementFromPoint(e.clientX,e.clientY); if(h) t=h; } const g=t&&t.closest&&t.closest('g.node'); return g?g.dataset.id:null; }
@@ -269,13 +313,15 @@ function stagePoint(e){ const r=$('#stage').getBoundingClientRect(); return [e.c
 function worldAt(x,y){ const {tx,ty,sc}=S.vp; return [(x-tx)/sc,(y-ty)/sc]; }
 let lastPtr='mouse';
 function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map(); let pan=null, drag=null, pinch=null, lp=null;
-  st.addEventListener('pointerdown',e=>{ lastPtr=e.pointerType||'mouse'; if(e.target.closest('.editbox')||e.target.closest('.nodetb')||e.button===2) return;
+  st.addEventListener('pointerdown',e=>{ lastPtr=e.pointerType||'mouse'; if(e.target.closest('.editbox')||e.target.closest('.nodetb')||e.target.closest('.multibar')||e.button===2) return;
     // touch: no compatibility mousedown afterwards, so it can't move focus away from an editor opened by this tap (Android keyboard)
     if(e.pointerType!=='mouse') e.preventDefault(); st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
     if(pts.size===2){ const [a,b]=[...pts.values()]; pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),c:[(a[0]+b[0])/2,(a[1]+b[1])/2]}; pan=null; drag=null; clearTimeout(lp); return; }
     const id=nodeAt(e), [x,y]=stagePoint(e);
     const relEl=!S.relPick&&!S.preview&&e.target.closest&&e.target.closest('g.rel');
     if(relEl&&!id||relEl&&relEl.classList.contains('rellbl')){ e.preventDefault(); pts.delete(e.pointerId); relClick(relEl.dataset.rel,e.clientX,e.clientY); return; }
+    if(!id&&!S.preview&&!S.relPick&&e.target.closest&&e.target.closest('.bdhit,.bdlbl')){ e.preventDefault(); pts.delete(e.pointerId); if(S.editing) commitEdit(); openBdMenu(e.target.closest('[data-bd]').dataset.bd,e.clientX,e.clientY); if(MENU&&e.pointerType!=='mouse') MENU.lp=true; return; }
+    if(!id&&!S.preview&&!S.relPick&&e.target.closest&&e.target.closest('.smhit')){ e.preventDefault(); pts.delete(e.pointerId); if(S.editing) commitEdit(); openSmMenu(e.target.closest('[data-sm]').dataset.sm,e.clientX,e.clientY); if(MENU&&e.pointerType!=='mouse') MENU.lp=true; return; }
     if(e.target.closest('.handle')){ e.preventDefault(); addChild(); return; }
     if(e.target.closest('.cc')){ e.preventDefault(); toggleCollapse(id); return; }
     if(id){ drag={id,x0:x,y0:y,moved:false,link:!!e.target.closest('[data-link]')}; if(e.pointerType!=='mouse'&&!S.relPick) lp=setTimeout(()=>{ if(drag&&!drag.moved){ drag=null; S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); if(MENU) MENU.lp=true; } },520); }
@@ -283,14 +329,15 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
   st.addEventListener('pointermove',e=>{ if(!pts.has(e.pointerId)) return; pts.set(e.pointerId,stagePoint(e)); const [x,y]=stagePoint(e);
     if(pinch&&pts.size===2){ const [a,b]=[...pts.values()]; const d=Math.hypot(a[0]-b[0],a[1]-b[1]); const c=[(a[0]+b[0])/2,(a[1]+b[1])/2]; const f=d/pinch.d; const v=S.vp, ns=Math.max(.15,Math.min(3,v.sc*f)), k=ns/v.sc; S.vp={sc:ns,tx:c[0]-(pinch.c[0]-v.tx)*k,ty:c[1]-(pinch.c[1]-v.ty)*k}; pinch={d,c}; applyVp(); return; }
     if(pan){ if(Math.hypot(x-pan.x0,y-pan.y0)>3) pan.moved=true; S.vp={...S.vp,tx:pan.tx+x-pan.x0,ty:pan.ty+y-pan.y0}; applyVp(); }
-    else if(drag){ if(S.relPick) return; if(!drag.moved&&Math.hypot(x-drag.x0,y-drag.y0)>6){ drag.moved=true; clearTimeout(lp); if(drag.id===S.doc.root.id||S.preview){drag=null;return;} st.classList.add('dragging'); }
+    else if(drag){ if(S.relPick) return; if(!drag.moved&&Math.hypot(x-drag.x0,y-drag.y0)>6){ drag.moved=true; clearTimeout(lp); if(drag.id===S.doc.root.id||S.preview||find(S.doc.root,drag.id)?.host){drag=null;return;} st.classList.add('dragging'); }
       if(drag&&drag.moved){ const [wx,wy]=worldAt(x,y); let t=null; for(const n of lay.by.values()){ if(n.id!==drag.id&&n.x!==undefined&&Math.abs(wx-n.x)<=n.w/2+6&&Math.abs(wy-n.y)<=n.h/2+6){t=n;break;} }
         const where=t?(wy<t.y-t.h/4&&t.d>0?'before':wy>t.y+t.h/4&&t.d>0?'after':'child'):null; drag.t=t&&t.id; drag.where=where; if(S.drop!==drag.t){S.drop=drag.t; drawMap();} showGhost(x,y,drag); } } });
   const end=e=>{ if(!pts.has(e.pointerId)) return; pts.delete(e.pointerId); clearTimeout(lp); if(pts.size<2&&pinch){ pinch=null; drawMap(); return; }
-    if(pan){ if(!pan.moved&&S.editing&&Date.now()-editAt>400){ commitEdit(); if(!isM()) $('#cv').focus({preventScroll:true}); } if(!pan.moved&&S.selRel){ S.selRel=null; drawMap(); } if(pan.moved) drawMap(); pan=null; }
+    if(pan){ if(!pan.moved&&S.editing&&Date.now()-editAt>400){ commitEdit(); if(!isM()) $('#cv').focus({preventScroll:true}); } if(!pan.moved&&S.selRel){ S.selRel=null; drawMap(); } if(pan.moved) drawMap(); else if(S.selBd){ S.selBd=null; drawMap(); } pan=null; }
     else if(drag){ const d=drag; drag=null; st.classList.remove('dragging'); hideGhost(); if(d.moved){ S.drop=null; if(d.t) moveNode(d.id,d.t,d.where); else drawMap(); }
       else if(S.relPick){ relPickTo(d.id); }
       else if(d.link){ if(S.editing) commitEdit(); select(d.id,{scroll:false}); openDetails('link'); }
+      else if(!S.preview&&(S.mselMode||(e.pointerType==='mouse'&&(e.shiftKey||e.ctrlKey||e.metaKey)))){ if(S.editing) commitEdit(); toggleMulti(d.id); }
       else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')){ startEdit(d.id); if(e.pointerType==='touch'){ tapOpened=Date.now(); tapPt=[e.clientX,e.clientY]; } } /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('touchend',e=>{ if(Date.now()-tapOpened<400){ e.preventDefault(); dbg('touchend cancelled (tap opened editor)'); } },{passive:false});
@@ -302,7 +349,8 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
 function showGhost(x,y,d){ let g=$('#ghost'); const n=lay.by.get(d.id); if(!g){g=document.createElement('div');g.id='ghost';g.className='dragghost';$('#ovl').appendChild(g);} g.textContent=(n?n.t:'')+(d.t?(d.where==='child'?' → 成為子節點':d.where==='before'?' → 放到上方':' → 放到下方'):''); g.style.left=(x+14)+'px'; g.style.top=(y+10)+'px'; }
 function hideGhost(){ $('#ghost')?.remove(); }
 // ---------- keyboard ----------
-function navigate(key){ const f=selInfo(); if(!f) return select(S.doc.root.id); const n=lay.by.get(f.n.id);
+function navigate(key){ const f=selInfo(); if(!f) return select(S.doc.root.id); const n=lay.by.get(f.n.id); if(!n) return;
+  if(f.host&&key===(n.side===-1?'ArrowRight':'ArrowLeft')) return select(f.host.id);
   const mode=lay.r.layout;
   if(mode==='org'){ // spatial: nearest visible node in that direction
     const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[key]; if(key==='ArrowDown'&&f.n.collapsed) toggleCollapse(f.n.id);
@@ -324,6 +372,10 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
   else if(k==='Enter'&&!c){ e.preventDefault(); e.shiftKey?startEdit(S.sel):addSibling(); }
   else if(k===' '||k==='F2'){ e.preventDefault(); startEdit(S.sel||S.doc.root.id); }
   else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); removeSel(); }
+  else if(c&&!e.altKey&&(e.code==='BracketRight'||k===']')){ e.preventDefault(); addSummary(); }
+  else if(c&&!e.altKey&&!e.shiftKey&&k.toLowerCase()==='b'){ e.preventDefault(); addBoundary(); }
+  else if(e.shiftKey&&!c&&!e.altKey&&(k==='ArrowUp'||k==='ArrowDown')){ e.preventDefault(); const f=selInfo(); if(!f||!f.parent) return; const j=f.idx+(k==='ArrowUp'?-1:1), sib=f.parent.c[j]; if(!sib) return; const m=new Set(S.msel&&S.msel.length?S.msel:[f.n.id]); if(m.has(sib.id)) m.delete(f.n.id); else m.add(sib.id); S.msel=[...m]; S.sel=sib.id; drawAll(); ensureVisible(sib.id); }
+  else if(k==='Escape'&&((S.msel&&S.msel.length)||S.mselMode||S.selBd)){ e.preventDefault(); S.selBd=null; clearMulti(); }
   else if(k.startsWith('Arrow')&&e.altKey){ e.preventDefault(); if(k==='ArrowUp')reorder(-1); else if(k==='ArrowDown')reorder(1); }
   else if(k.startsWith('Arrow')){ e.preventDefault(); navigate(k); }
   else if(c&&!e.altKey&&!e.shiftKey&&/^[cxv]$/i.test(k)) clipKey(k.toLowerCase());
@@ -378,7 +430,7 @@ function openMenu(html,trigger,pos){ closeMenu(); const L=$('#layer'); L.insertA
     else if(e.key==='Tab'){e.preventDefault();closeMenu(true);} }); }
 function closeMenu(restore){ if(!MENU) return false; const {el,trigger}=MENU; MENU=null; el.remove(); $('#layer .menuscrim')?.remove(); if(trigger){trigger.setAttribute('aria-expanded','false'); if(restore&&document.contains(trigger)) trigger.focus();} return true; }
 const mi=(act,icon,label,cls='',v='')=>`<button role="menuitem" tabindex="-1" data-act="${act}"${v!==''?` data-v="${esc(v)}"`:''}${cls?` class="${cls}"`:''}>${I(icon)}<span>${label}</span></button>`;
-function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['quickStyle','palette','快速樣式'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],...(allDeep(n).some(x=>x!==n&&x.c&&x.c.length)?[['expandAll','plus','展開全部子節點','',id],['collapseAll','minus','收合全部子節點','',id]]:[]),['relStart','rel','關聯線'],...(relsOf(S.doc.root).some(r=>r.a===id||r.b===id)?[['relOf','rel','編輯關聯線']]:[]),['aiExpand','spark','AI 擴充'],...((n.c||[]).length>=3?[['aiRegroup','group','AI 重新分組']]:[]),['delete','trash','刪除','del']];
+function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['quickStyle','palette','快速樣式'],['style','palette','樣式'],['multiStart','multi','多選'],['summary','brace','概要'],['boundary','frame','外框'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],...(allDeep(n).some(x=>x!==n&&x.c&&x.c.length)?[['expandAll','plus','展開全部子節點','',id],['collapseAll','minus','收合全部子節點','',id]]:[]),['relStart','rel','關聯線'],...(relsOf(S.doc.root).some(r=>r.a===id||r.b===id)?[['relOf','rel','編輯關聯線']]:[]),['aiExpand','spark','AI 擴充'],...((n.c||[]).length>=3?[['aiRegroup','group','AI 重新分組']]:[]),['delete','trash','刪除','del']];
   openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c,v])=>mi(a,i,l,c||'',v===undefined?'':v)).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
 function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   const n=S.unsynced, syncIt=S.remote?mi('syncNow',S.driveAuth||S.sync.state==='error'?'alert':'cloud',S.driveAuth?'重新連結 Google 才能同步':S.sync.state==='saving'?'同步中…':n?`同步（${n} 項未同步）`:'已同步，再同步一次',S.driveAuth||S.sync.state==='error'?'warnit':n?'hasit':'')+'<hr>':'';
@@ -726,7 +778,7 @@ async function act(a,v,el){ const f=selInfo();
   case 'nodeMenuTb': { const r=el.getBoundingClientRect(); S.sel&&openNodeMenu(S.sel,r.left+r.width/2,r.bottom); if(MENU) MENU.trigger=el; break; }
   case 'delete': closeMenu(); removeSel(); $('#cv').focus(); break;
   case 'collapse': closeMenu(); toggleCollapse(); break;
-  case 'copyNode': { closeMenu(); if(!f||!f.parent) return toast('中心主題不能複製'); const cp=ensureIds(JSON.parse(JSON.stringify(f.n).replace(/"id":"[^"]+",?/g,''))); mutate(r=>{find(r,f.parent.id).n.c.splice(f.idx+1,0,cp);},{select:cp.id}); break; }
+  case 'copyNode': { closeMenu(); if(!f||!f.parent) return toast('中心主題不能複製'); const cp=IO.reId(f.n); mutate(r=>{find(r,f.parent.id).n.c.splice(f.idx+1,0,cp);},{select:cp.id}); break; }
   case 'priMenu': closeMenu(); openPriMenu(); break;
   case 'icons': closeMenu(); openIcons(); break;
   case 'emojiCat': if(S.dialog){ S.dialog.cat=v; drawDialog(); $(`#layer [data-act="emojiCat"][data-v="${v}"]`)?.focus(); } break;
@@ -764,10 +816,18 @@ async function act(a,v,el){ const f=selInfo();
   case 'icon': setField('icon',v); break;
   case 'level': closeMenu(); setLevel(+v); break;
   case 'quickStyle': { closeMenu(); const n=f&&f.n; if(!n) return toast('先選一個節點'); const T=th(), r=$('#cv').getBoundingClientRect();
-    openMenu(`<div class="ctx qsmenu" role="menu" aria-label="快速樣式"><div class="lphead">快速樣式：${esc(n.t)}</div>${V.qsGrid(n,V.canvasOf(S.doc,T),T.text,true)}<hr>${mi('qsCopy','copy','複製樣式')}${S.qsClip?mi('qsPaste','paste','貼上樣式'):''}</div>`,$('#cv'),{x:r.left+r.width/2-150,y:r.top+90}); break; }
-  case 'qs': { closeMenu(); if(!f) return toast('先選一個節點'); const ids=[f.n.id]; mutate(r=>{ ids.forEach(id=>{ const x=find(r,id).n; if(v) x.qs=v; else delete x.qs; delete x.hl; delete x.color; }); }); panelRefresh(); toast(v?'已套用「'+((V.QSN||{})[v]||'快速樣式')+'」':'已清除樣式'); break; }
+    openMenu(`<div class="ctx qsmenu" role="menu" aria-label="快速樣式"><div class="lphead">快速樣式：${selIds().length>1?selIds().length+' 個節點':esc(n.t)}</div>${V.qsGrid(n,V.canvasOf(S.doc,T),T.text,true)}<hr>${mi('qsCopy','copy','複製樣式')}${S.qsClip?mi('qsPaste','paste','貼上樣式'):''}</div>`,$('#cv'),{x:r.left+r.width/2-150,y:r.top+90}); break; }
+  case 'qs': { closeMenu(); const ids=selIds(); if(!ids.length) return toast('先選一個節點'); mutate(r=>{ ids.forEach(id=>{ const x=find(r,id).n; if(v) x.qs=v; else delete x.qs; delete x.hl; delete x.color; }); }); panelRefresh(); toast((v?'已套用「'+((V.QSN||{})[v]||'快速樣式')+'」':'已清除樣式')+(ids.length>1?`（${ids.length} 個節點）`:'')); break; }
+  case 'summary': closeMenu(); addSummary(); break;
+  case 'boundary': closeMenu(); addBoundary(); break;
+  case 'multiStart': closeMenu(); S.mselMode=true; S.msel=S.sel?[S.sel]:[]; drawAll(); toast(isM()?'點節點加入或取消':'點節點加入或取消（也可以 Shift／Ctrl＋點）'); break;
+  case 'multiDone': clearMulti(); break;
+  case 'multiDel': removeMany(selIds()); break;
+  case 'bdLabel': { closeMenu(); const B=bdFind(v); if(!B) return; const t=await askText('外框標籤','標籤（可留空，最多 30 字）',B.e.t||''); if(t===null) return; mutate(r=>{ const x=bdFind(v); if(!x) return; const e=bdOf(find(r,x.host.id).n).find(q=>q.id===v); const val=t.trim().slice(0,30); if(val) e.t=val; else delete e.t; }); S.selBd=v; drawMap(); break; }
+  case 'bdColor': { closeMenu(); const [id,c]=String(v).split('|'); mutate(r=>{ const x=bdFind(id); if(!x) return; const e=bdOf(find(r,x.host.id).n).find(q=>q.id===id); if(c) e.col=c; else delete e.col; }); S.selBd=id; drawMap(); break; }
+  case 'bdDel': { closeMenu(); const B=bdFind(v); if(!B) return; mutate(r=>{ const h=find(r,B.host.id).n; h.bd=bdOf(h).filter(q=>q.id!==v); if(!h.bd.length) delete h.bd; }); S.selBd=null; drawMap(); toast('已移除外框',['復原','undo']); break; }
   case 'qsCopy': { closeMenu(); if(!f) return toast('先選一個節點'); const n=f.n; S.qsClip={qs:n.qs||'',hl:n.hl||'',color:n.color}; panelRefresh(); toast('已複製樣式：點另一個節點，再按「貼上樣式」'); break; }
-  case 'qsPaste': { closeMenu(); if(!f||!S.qsClip) return; const c=S.qsClip; mutate(r=>{ const x=find(r,f.n.id).n; for(const k of ['qs','hl','color']){ if(c[k]===''||c[k]===undefined) delete x[k]; else x[k]=c[k]; } }); panelRefresh(); toast('已貼上樣式'); break; }
+  case 'qsPaste': { closeMenu(); const ids=selIds(); if(!ids.length||!S.qsClip) return; const c=S.qsClip; mutate(r=>{ ids.forEach(id=>{ const x=find(r,id).n; for(const k of ['qs','hl','color']){ if(c[k]===''||c[k]===undefined) delete x[k]; else x[k]=c[k]; } }); }); panelRefresh(); toast('已貼上樣式'); break; }
   case 'expandAll': closeMenu(); foldAll(true,v||''); break;
   case 'collapseAll': closeMenu(); foldAll(false,v||''); break;
   case 'zoomIn': zoomAt(1.2); updMenuPct(); break; case 'zoomOut': zoomAt(1/1.2); updMenuPct(); break;

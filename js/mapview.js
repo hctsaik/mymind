@@ -1,6 +1,7 @@
 // Layout + SVG rendering for the right-expanding logic chart (DESIGN §7). Pure functions: data in, SVG string out.
 import { readable, cr, lum, mix, tint, esc, PRI, P, isMark, markInner, qsLook } from './core.js';
-import { clLayout, clNodeSvg, clEdges, clExpander } from './classic.js';
+import { clLayout, clNodeSvg, clEdges, clExpander, clSum, clSumPlace } from './classic.js';
+import { placeExtras, decoBounds, smOf, rangeIdx } from './extras.js';
 const mctx=document.createElement('canvas').getContext('2d');
 export const FF='"Noto Sans TC","Noto Sans CJK TC","PingFang TC","Microsoft JhengHei",sans-serif';
 const twc=new Map();
@@ -8,8 +9,8 @@ export const tw=(s,font)=>{const k=font+'|'+s; let v=twc.get(k); if(v===undefine
 export const fsOf=d=>d===0?22:d===1?16:14;
 export const fontOf=(d,th)=>d===0?`700 22px ${FF}`:d===1?`${th&&th.l1==='box'?700:600} 16px ${FF}`:`400 14px ${FF}`;
 export const kids=n=>(n.collapsed||!n.c)?[]:n.c;
-export const all=(n,a=[])=>{a.push(n);kids(n).forEach(c=>all(c,a));return a;};
-export const allDeep=(n,a=[])=>{a.push(n);(n.c||[]).forEach(c=>allDeep(c,a));return a;};
+export const all=(n,a=[])=>{a.push(n);kids(n).forEach(c=>all(c,a));(n._sv||[]).forEach(c=>all(c,a));return a;};
+export const allDeep=(n,a=[])=>{a.push(n);(n.c||[]).forEach(c=>allDeep(c,a));smOf(n).forEach(c=>allDeep(c,a));return a;};
 export const countDesc=n=>(n.c||[]).reduce((s,c)=>s+1+countDesc(c),0);
 const SPACING={compact:[48,6],standard:[64,10],loose:[84,16]};
 
@@ -37,32 +38,46 @@ function prep(n,d,br,boxed,th,par){
   const ib=imgBox(n.img); n.ib=ib; n.ih=ib?ib.h+10:0;
   n.w=Math.ceil(Math.max(w,ib?ib.w:0)+padX*2); n.h=(d===0?58:d===1?42:(boxed?34:32))+n.lh+n.ih; n.padX=padX;
   (n.c||[]).forEach((c,i)=>prep(c,d+1,d===0?i:br,boxed,th,n));
+  smOf(n).forEach(sm=>{ const r=rangeIdx(n,sm.a,sm.b); prep(sm,d+1,d===0?(r?r[0]:0):br,boxed,th,n); });
 }
-function subH(n,g1){const k=kids(n); if(!k.length) return n.h; const g=n.d===0?26:g1; return Math.max(n.h,k.reduce((s,c)=>s+subH(c,g1),0)+g*(k.length-1));}
+// 概要 reserve room: when a summary's own subtree is taller than its range, the range gets extra space above and below
+function smPads(n,g1){ const k=kids(n); if(!k.length||!Array.isArray(n.sm)) return null; const g=n.d===0?26:g1, pb=k.map(()=>0), pa=k.map(()=>0); let any=false;
+  for(const s of smOf(n)){ const r=rangeIdx(n,s.a,s.b); if(!r||s.h===undefined) continue; let h=0; for(let i=r[0];i<=r[1];i++) h+=subH(k[i],g1)+(i>r[0]?g:0); const e=subH(s,g1)-h; if(e>0){ pb[r[0]]+=e/2; pa[r[1]]+=e/2; any=true; } }
+  return any?{pb,pa}:null; }
+const slotH=(n,P,i,c,g1)=>subH(c,g1)+(P?P.pb[i]+P.pa[i]:0);
+function subH(n,g1){const k=kids(n); if(!k.length) return n.h; const g=n.d===0?26:g1, P=smPads(n,g1); return Math.max(n.h,k.reduce((s,c,i)=>s+slotH(n,P,i,c,g1),0)+g*(k.length-1));}
 function placeH(n,cx,top,hg1,g1){
   const sh=subH(n,g1); n.x=cx; n.y=top+sh/2; n.side=1;
   const k=kids(n); if(!k.length) return;
-  const g=n.d===0?26:g1, tot=k.reduce((s,c)=>s+subH(c,g1),0)+g*(k.length-1);
+  const g=n.d===0?26:g1, P=smPads(n,g1), tot=k.reduce((s,c,i)=>s+slotH(n,P,i,c,g1),0)+g*(k.length-1);
   let y=n.y-tot/2; const hg=n.d===0?hg1:Math.round(hg1*.62);
-  k.forEach(c=>{placeH(c,n.x+n.w/2+hg+c.w/2,y,hg1,g1); y+=subH(c,g1)+g;});
+  k.forEach((c,i)=>{ if(P) y+=P.pb[i]; placeH(c,n.x+n.w/2+hg+c.w/2,y,hg1,g1); y+=subH(c,g1)+g+(P?P.pa[i]:0); });
 }
 function mirror(n){ n.x=-n.x; n.side=-1; kids(n).forEach(mirror); }
 function placeBalanced(root,hg,g){ root.x=0; root.y=0; root.side=0; const k=kids(root); if(!k.length) return;
-  const hs=k.map(c=>subH(c,g)), total=hs.reduce((a,b)=>a+b,0); let acc=0, cut=k.length;
+  const P=smPads(root,g), hs=k.map((c,i)=>slotH(root,P,i,c,g)), total=hs.reduce((a,b)=>a+b,0); let acc=0, cut=k.length;
   for(let i=0;i<k.length;i++){ if(acc>=total/2&&i>0){ cut=i; break; } acc+=hs[i]; } if(cut===k.length&&k.length>1) cut=Math.ceil(k.length/2);
   const R=k.slice(0,cut), L=k.slice(cut); const G=26;
-  for(const [grp,sgn] of [[R,1],[L,-1]]){ if(!grp.length) continue; const tot=grp.reduce((s,c)=>s+subH(c,g),0)+G*(grp.length-1); let y=-tot/2;
-    grp.forEach(c=>{ placeH(c,root.w/2+hg+c.w/2,y,hg,g); if(sgn<0) mirror(c); y+=subH(c,g)+G; }); }
+  for(const [grp,sgn] of [[R,1],[L,-1]]){ if(!grp.length) continue; const ix=c=>k.indexOf(c), tot=grp.reduce((s,c)=>s+hs[ix(c)],0)+G*(grp.length-1); let y=-tot/2;
+    grp.forEach(c=>{ const i=ix(c); if(P) y+=P.pb[i]; placeH(c,root.w/2+hg+c.w/2,y,hg,g); if(sgn<0) mirror(c); y+=subH(c,g)+G+(P?P.pa[i]:0); }); }
   root.sides={R:R.map(c=>c.id),L:L.map(c=>c.id)}; }
 const ORG={vg:58,hg:28,ind:24,rg:10};
-function orgColW(n,ind){ let w=n.w+ind; kids(n).forEach(c=>{ w=Math.max(w,orgColW(c,ind+ORG.ind)); }); return w; }
+const treeW=n=>n.w+(kids(n).length?40+Math.max(...kids(n).map(treeW)):0);
+function orgColW(n,ind){ let w=n.w+ind; kids(n).forEach(c=>{ w=Math.max(w,orgColW(c,ind+ORG.ind)); });
+  for(const s of smOf(n)){ const r=rangeIdx(n,s.a,s.b); if(!r||n.collapsed||s.w===undefined) continue; const cw=Math.max(...n.c.slice(r[0],r[1]+1).map(c=>orgColW(c,ind+ORG.ind))); w=Math.max(w,cw+44+treeW(s)); } return w; }
 function orgCol(n,left,ind,yRef){ kids(n).forEach(c=>{ c.x=left+ind+c.w/2; c.y=yRef.y+c.h/2; c.side=2; yRef.y+=c.h+ORG.rg; orgCol(c,left,ind+ORG.ind,yRef); }); }
 function placeOrg(root){ root.x=0; root.y=0; root.side=0; const k=kids(root); if(!k.length) return;
   const ws=k.map(c=>orgColW(c,0)), total=ws.reduce((a,b)=>a+b,0)+ORG.hg*(k.length-1); let x=-total/2; const top=root.h/2+ORG.vg;
   const hmax=Math.max(...k.map(c=>c.h));
   k.forEach((c,i)=>{ c.x=x+c.w/2; c.y=top+hmax/2; c.side=3; const yRef={y:top+hmax+ORG.rg+4}; orgCol(c,x,ORG.ind,yRef); x+=ws[i]+ORG.hg; }); }
 export const LAYOUTS=[['right','向右邏輯圖'],['balanced','左右心智圖'],['org','組織圖']];
-export function layout(root,th,st={}){
+const markSum=n=>{ n._st=1; (n.c||[]).forEach(markSum); };
+export function layout(root,th,st={}){ return placeExtras(layout0(root,th,st),root.cl?{
+    size:(s,d,br,host)=>clSum(s,d,br,host,root), place:(s,x,y,side)=>{ clSumPlace(s,side===-1?x-s.w/2:side===2?x:x+s.w/2,side===2?y+s.h/2:y,side); markSum(s); } }:{
+    size:(s,d,br,host)=>prep(s,d,br,!!th.deepBox,th,host),
+    place:(s,x,y,side)=>{ const g=(SPACING[st.spacing||'standard']||SPACING.standard), sh=subH(s,g[1]);
+      if(side===2) placeH(s,x,y,g[0],g[1]); else if(side<0){ placeH(s,-(x-s.w/2),y-sh/2,g[0],g[1]); mirror(s); } else placeH(s,x+s.w/2,y-sh/2,g[0],g[1]); markSum(s); } }); }
+function layout0(root,th,st={}){
   if(th.engine==='classic') return clLayout(root,th,st);
   const boxed=!!th.deepBox; const [hg,g]=SPACING[st.spacing||'standard']||SPACING.standard; const mode=['balanced','org'].includes(st.layout)?st.layout:'right';
   prep(root,0,0,boxed,th,null); root.boxed=boxed; root.layout=mode;
@@ -71,7 +86,7 @@ export function layout(root,th,st={}){
   else { placeH(root,0,-subH(root,g)/2,hg,g); if((st.rootTop??th.rootTop)&&kids(root).length){root.y=kids(root)[0].y;} }
   return root;
 }
-export function bounds(root){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;all(root).forEach(n=>{const cc=n.collapsed&&n.c&&n.c.length?28:0; x0=Math.min(x0,n.x-n.w/2-(n.side===-1?cc:0));x1=Math.max(x1,n.x+n.w/2+(n.side===-1?0:cc));y0=Math.min(y0,n.y-n.h/2);y1=Math.max(y1,n.y+n.h/2)});return{x0,y0,x1,y1,w:x1-x0,h:y1-y0};}
+export function bounds(root){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;all(root).forEach(n=>{const cc=n.collapsed&&n.c&&n.c.length?28:0; x0=Math.min(x0,n.x-n.w/2-(n.side===-1?cc:0));x1=Math.max(x1,n.x+n.w/2+(n.side===-1?0:cc));y0=Math.min(y0,n.y-n.h/2);y1=Math.max(y1,n.y+n.h/2)});return decoBounds(root,{x0,y0,x1,y1,w:x1-x0,h:y1-y0});}
 export function colorOf(n,th){ if(n.d===0) return th.root; if(n.br&&typeof n.br==='object'){ const M=marks(th); return M[n.br.m%M.length][0]; } return th.br[n.br%th.br.length]; }
 // Colour marks: the theme's own branch colours when it has enough distinct ones, else a fixed set tuned for light/dark.
 // Each has a plain name so the picker never relies on colour alone.
@@ -104,7 +119,7 @@ export function renderMap(root,th,opt={}){
     const col=colorOf(c,th); let p='';
     const s=c.side===-1?-1:1, plainOff=(m)=>th.deep==='plain'&&m.d>=2?(m.padX-5):0;
     const x1=n.x+s*(n.w/2-plainOff(n)), x2=c.x-s*(c.w/2-plainOff(c));
-    if(ORGM){ const r=8; const under=c.d>=2&&!root.boxed&&th.deep!=='plain';
+    if(ORGM&&!c._st){ const r=8; const under=c.d>=2&&!root.boxed&&th.deep!=='plain';
       if(c.side===3){ const yb=n.y+n.h/2, yt=c.y-c.h/2, ym=yb+ORG.vg/2, dx=c.x-n.x, sg=Math.sign(dx), rr=Math.min(r,Math.abs(dx)/2);
         p=Math.abs(dx)<1?`M${n.x},${yb} V${yt}`:`M${n.x},${yb} V${ym-rr} Q${n.x},${ym} ${n.x+sg*rr},${ym} H${c.x-sg*rr} Q${c.x},${ym} ${c.x},${ym+rr} V${yt}`; }
       else { const px=n.x-n.w/2+Math.min(16,n.w/3), yb=n.y+n.h/2-(n.d>=2&&!root.boxed&&th.deep!=='plain'?0:0), y2=under?c.y+c.h/2:c.y, xe=c.x-c.w/2;
@@ -118,6 +133,7 @@ export function renderMap(root,th,opt={}){
     const base=th.lw||(th.line?(n.d===0?1.8:1.2):(edge==='bracket'?(n.d===0?2.6:1.6):(n.d===0?3.2:2)));
     edges+=`<path data-g="edge" data-gbg="${CV}" d="${p}" fill="none" stroke="${lineC&&!(c.br&&typeof c.br==='object')?G(lineC):G(col)}" stroke-width="${Math.max(base*mult,minW).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   }));
+  edges=decoSvg(root,th,opt,{CV,G,SEL,minW})+edges;
   const R=relsSvg(root,th,opt,{CV,G,SEL,minW}); defs+=R.defs; edges+=R.lines;
   nodes.forEach(n=>{
     if(root.cl){ const C=clNodeSvg(n,th,root); body+=overlays(n,C.g,C.rx,root,th,opt,{CV,SEL,SELK,nodeBg,col:th.line}); return; }
@@ -166,7 +182,8 @@ export function renderMap(root,th,opt={}){
     if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
     if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
       g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
-    if(opt.sel===n.id&&!opt.thumb){
+    if(opt.msel&&opt.msel.has(n.id)&&!opt.thumb) g=mselMark(g,x,y,n,rx,{SEL,SELK,CV});
+    else if(opt.sel===n.id&&!opt.thumb){
       g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
       if(n.c&&n.c.length&&!n.collapsed) g+=foldToggle(n.x+(n.side===-1?-1:1)*(n.w/2+14),n.y,readable(col,nodeBg,3),nodeBg,countDesc(n),n.side===-1?-1:1,opt.sc,opt.mobile,n);
       const open=n.c&&n.c.length&&!n.collapsed, hx=n.x+(n.side===-1?-1:1)*(n.w/2+(open?14:n.collapsed&&n.c&&n.c.length?44:22)), hy=open?n.y+Math.max(n.h/2,10)+24:n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
@@ -176,6 +193,21 @@ export function renderMap(root,th,opt={}){
   return {svg:`<defs><filter id="blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>${defs}</defs><g class="edges">${edges}</g>${body}${R.labels}`,b:relBounds(root,bounds(root))};
 }
 // selection / find / drop / collapse overlays for the classic engine (same look as the default renderer)
+// 外框 behind everything, 概要 brackets with the lines; hit strokes are wide and invisible (labels and borders open their menu)
+const LBLF=`600 12px ${FF}`;
+function decoSvg(root,th,opt,{CV,G,SEL,minW}){ const D=root._deco; if(!D) return ''; let out='';
+  const refCol=n=>{ if(root.cl){ const s=n.st||{}; return isNoneC(s.stroke)?(s.cc||'#8B8D98'):s.stroke; } return n.d===0?th.root:colorOf(n,th); };
+  const hex=c=>/^#[0-9a-f]{6}$/i.test(c)?c:'#8B8D98';
+  D.bd.forEach(r=>{ const c=readable(hex(r.col||refCol(r.ref)),CV,3), sel=opt.selBd===r.id&&!opt.thumb, W=r.x1-r.x0, H=r.y1-r.y0;
+    let lbl=''; if(r.t){ const t=r.t.length>24?r.t.slice(0,23)+'…':r.t, w=Math.ceil(tw(t,LBLF))+20, lx=r.x0+14, ly=r.y0-11;
+      lbl=`<g class="bdlbl" data-bd="${r.id}"${opt.thumb?'':' role="button" aria-label="外框：'+esc(r.t)+'"'}><rect x="${lx}" y="${ly}" width="${w}" height="22" rx="11" fill="${CV}" stroke="${c}" stroke-width="1.4" data-g="edge" data-gbg="${CV}"/><text x="${lx+10}" y="${ly+15}" font-size="12" font-weight="600" fill="${readable(c,CV,4.6)}" data-bg="${CV}">${esc(t)}</text></g>`; }
+    out+=`<g class="bdg" data-bd="${r.id}" data-host="${r.host}"><rect x="${r.x0}" y="${r.y0}" width="${W}" height="${H}" rx="14" fill="${c}" fill-opacity=".06" stroke="${c}" stroke-width="${Math.max(sel?2.6:1.6,minW).toFixed(2)}" stroke-dasharray="${sel?'':'7 5'}" pointer-events="none" data-g="edge" data-gbg="${CV}"/>${opt.thumb?'':`<rect class="bdhit" x="${r.x0}" y="${r.y0}" width="${W}" height="${H}" rx="14" fill="none" stroke="transparent" stroke-width="16" pointer-events="stroke"/>`}${lbl}</g>`; });
+  D.br.forEach(b=>{ const c=G(hex(refCol(b.ref)));
+    out+=`<g class="smg" data-sm="${b.id}"><path d="${b.d}" fill="none" stroke="${c}" stroke-width="${Math.max(2,minW).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" data-g="edge" data-gbg="${CV}"/>${opt.thumb?'':`<path class="smhit" d="${b.d}" fill="none" stroke="transparent" stroke-width="16" pointer-events="stroke"/>`}</g>`; });
+  return out; }
+// v1.9 multi-select: ring + check badge on every picked node
+function mselMark(g,x,y,n,rx,{SEL,SELK,CV}){ const bx=x-5, by=y-5;
+  return `<rect x="${bx}" y="${by}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}14" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g+`<g class="mcheck" aria-hidden="true"><circle cx="${bx+2}" cy="${by+2}" r="9" fill="${SEL}" data-g="handle" data-gbg="${CV}"/><path d="M${bx-2},${by+2} l3,3 l5,-6" stroke="${SELK}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>`; }
 function overlays(n,g,rx,root,th,opt,{CV,SEL,SELK,nodeBg,col}){ const x=n.x-n.w/2, y=n.y-n.h/2, d=n.d;
   if(n.collapsed&&n.c&&n.c.length&&root.spec&&root.gs) g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點">${clExpander(n,countDesc(n),root.spec.bg)}</g>`;
   else if(n.collapsed&&n.c&&n.c.length){ const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
@@ -183,7 +215,8 @@ function overlays(n,g,rx,root,th,opt,{CV,SEL,SELK,nodeBg,col}){ const x=n.x-n.w/
   if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
   if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
     g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
-  if(opt.sel===n.id&&!opt.thumb){
+  if(opt.msel&&opt.msel.has(n.id)&&!opt.thumb) g=mselMark(g,x,y,n,rx,{SEL,SELK,CV});
+  else if(opt.sel===n.id&&!opt.thumb){
     g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
     if(n.c&&n.c.length&&!n.collapsed){ const sg=n.side===-1?-1:1, s0=n.st||{}, fc=root.spec&&root.gs?(isNoneC(s0.stroke)?(s0.cc||'#999'):s0.stroke):readable(col,CV,3);
       g+=root.spec&&root.gs?foldToggle(n.x+sg*(n.w/2+(n.fold||0)+13),n.y+(n.outY||0),rdHex(fc,root.spec.bg||nodeBg),root.spec.bg||nodeBg,countDesc(n),sg,opt.sc,opt.mobile,n):foldToggle(n.x+n.w/2+14,n.y,fc,nodeBg,countDesc(n),1,opt.sc,opt.mobile,n); }

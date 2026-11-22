@@ -10,7 +10,7 @@ window.__mmv=V; // tests
 const clone=o=>JSON.parse(JSON.stringify(o));
 function theme(){ const T=THEMES[V.doc.theme]||THEMES[DEFAULT_THEME], g=V.doc.root.gs; return g&&g.bg&&T.engine==='classic'?{...T,canvas:g.bg}:T; }
 const bgImg=()=>{ const T=THEMES[V.doc.theme]||THEMES[DEFAULT_THEME], g=V.doc.root.gs; return g&&g.bgImg&&T.engine==='classic'?`url("${g.bgImg}")`:''; };
-const find=(n,id)=>n.id===id?n:(n.c||[]).reduce((a,c)=>a||find(c,id),null);
+const find=(n,id)=>n.id===id?n:[...(n.c||[]),...(Array.isArray(n.sm)?n.sm:[])].reduce((a,c)=>a||find(c,id),null);
 const fmt=iso=>{ try{ const d=new Date(iso); return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }catch{ return ''; } };
 function message(title,body){ document.body.dataset.ready='err'; $('#vw').innerHTML=`<div class="vwmsg" role="alert">${I('alert')}<h2>${esc(title)}</h2><p>${esc(body)}</p><a class="btn" href="./">認識 MyMind</a></div>`; }
 function shell(){ const d=V.doc, T=theme();
