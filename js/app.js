@@ -453,10 +453,12 @@ const pathOf=id=>`maps/${id}.json`;
 const AUTO_MS=()=>+prefs.get().autoMs||3*60*1000;
 function syncInfo(){ S.prefs=prefs.get(); S.backend=S.prefs.backend||'github'; S.backendName=BN(); S.driveEmail=S.prefs.driveEmail||''; S.driveAuth=isDrive()&&remote()&&!GD.hasToken(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); }
 let autoT=null, persistAsked=false;
-function changed(){ syncInfo(); if(S.remote&&S.syncMode==='auto') scheduleAuto(); if(S.view!=='editor') return; }
+// the phone's slide-out menu is a copy of the sidebar: keep its list and sync count current (e.g. after a restore started from it)
+function refreshDrawer(){ const nd=$('.navdrawer .side'); if(nd&&!nd.contains(document.activeElement)) nd.innerHTML=V.sidebar(S,maps.index()); }
+function changed(){ syncInfo(); refreshDrawer(); if(S.remote&&S.syncMode==='auto') scheduleAuto(); if(S.view!=='editor') return; }
 function scheduleAuto(){ if(autoT) return; S.autoAt=Date.now()+AUTO_MS(); autoT=setTimeout(()=>{ autoT=null; S.autoAt=null; syncNow({reason:'auto'}); },AUTO_MS()); }
 function askPersist(){ if(persistAsked) return; persistAsked=true; storage.persist(); }
-function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='saved'?new Date().toISOString():S.sync.at}; drawChrome(); }
+function setSync(state,msg){ S.sync={...S.sync,state,msg:msg||'',at:state==='saved'?new Date().toISOString():S.sync.at}; drawChrome(); syncInfo(); refreshDrawer(); }
 let syncing=null, syncAgain=false;
 async function syncNow(opt={}){ if(syncing){ syncAgain=syncAgain||opt.push!==false; return syncing; }
   syncing=(async()=>{ try{ await syncOnce(opt); } finally { syncing=null; if(syncAgain){ syncAgain=false; await syncNow(); } } })(); return syncing; }
