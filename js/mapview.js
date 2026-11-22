@@ -82,6 +82,13 @@ export function hueName(hex){ const h=hex.replace('#',''); const [r,g,b]=[0,2,4]
 export function marks(th){ const u=[...new Set(th.br.map(c=>c.toUpperCase()))]; if(u.length>=5) return u.slice(0,6).map(c=>[c,hueName(c)]); return th.dark?MARKS_D:MARKS_L; }
 
 /* opt: {sel:id, lightLines:bool, sc:number (current zoom, for minimum visual line width), thumb, edge:'bracket'|'curve'|'straight', lw:'thin'|'standard'|'thick', lod, drop:id} */
+// the selected node's "−" toggle: collapse its branch with one tap (the count badge expands it again)
+const rdHex=(c,bg)=>/^#[0-9a-f]{6}$/i.test(c)&&/^#[0-9a-f]{6}$/i.test(bg)?readable(c,bg,3):c;
+const isNoneC=v=>v==null||v===''||v==='none'||v==='transparent';
+// hit area: a band that starts just outside the node and reaches outwards (≥44 CSS px tall on phones), so it never covers the node itself
+function foldToggle(cx,cy,stroke,bg,count,sg=1,sc=1,mobile=false,n=null){ const hh=Math.max(26,(mobile?44:28)/sc);
+  const gap=n&&n.c?Math.min(...n.c.filter(c=>c.x!==undefined).map(c=>Math.abs(c.x-sg*c.w/2-cx)),1e9):1e9, hw=Math.max(20,Math.min(Math.max(30,(mobile?44:30)/sc),gap+8)), x0=sg>0?cx-10:cx+10-hw;
+  return `<g class="cc" role="button" data-tap-equiv="nodetb" aria-label="收合 ${count} 個子節點"><rect x="${x0}" y="${cy-hh/2}" width="${hw}" height="${hh}" fill="transparent"/><circle data-g="collapse" data-gbg="${bg}" cx="${cx}" cy="${cy}" r="9" fill="${bg}" stroke="${stroke}" stroke-width="1.6"/><path data-g="icon" data-gbg="${bg}" d="M${cx-4},${cy}h8" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/></g>`; }
 export function renderMap(root,th,opt={}){
   const nodes=all(root); let edges='',body='',defs='';
   const nodeBg=th.dark?'#1E2128':'#FFFFFF';
@@ -158,7 +165,8 @@ export function renderMap(root,th,opt={}){
       g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
     if(opt.sel===n.id&&!opt.thumb){
       g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
-      const hx=n.x+(n.side===-1?-1:1)*(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
+      if(n.c&&n.c.length&&!n.collapsed) g+=foldToggle(n.x+(n.side===-1?-1:1)*(n.w/2+14),n.y,readable(col,nodeBg,3),nodeBg,countDesc(n),n.side===-1?-1:1,opt.sc,opt.mobile,n);
+      const open=n.c&&n.c.length&&!n.collapsed, hx=n.x+(n.side===-1?-1:1)*(n.w/2+(open?14:n.collapsed&&n.c&&n.c.length?44:22)), hy=open?n.y+Math.max(n.h/2,10)+24:n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
       g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
     body+=`<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`;
   });
@@ -174,7 +182,9 @@ function overlays(n,g,rx,root,th,opt,{CV,SEL,SELK,nodeBg,col}){ const x=n.x-n.w/
     g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
   if(opt.sel===n.id&&!opt.thumb){
     g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
-    const hx=n.x+(n.side===-1?-1:1)*(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
+    if(n.c&&n.c.length&&!n.collapsed){ const sg=n.side===-1?-1:1, s0=n.st||{}, fc=root.spec&&root.gs?(isNoneC(s0.stroke)?(s0.cc||'#999'):s0.stroke):readable(col,CV,3);
+      g+=root.spec&&root.gs?foldToggle(n.x+sg*(n.w/2+(n.fold||0)+13),n.y+(n.outY||0),rdHex(fc,root.spec.bg||nodeBg),root.spec.bg||nodeBg,countDesc(n),sg,opt.sc,opt.mobile,n):foldToggle(n.x+n.w/2+14,n.y,fc,nodeBg,countDesc(n),1,opt.sc,opt.mobile,n); }
+    const open=n.c&&n.c.length&&!n.collapsed, hx=n.x+(n.side===-1?-1:1)*(n.w/2+(open?14:n.collapsed&&n.c&&n.c.length?44:22)), hy=open?n.y+Math.max(n.h/2,10)+24:n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
     g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
   return `<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`; }
 export function thumbSvg(data,th,pad=30,st={}){const r=layout(JSON.parse(JSON.stringify(data)),th,st);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}

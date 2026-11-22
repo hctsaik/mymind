@@ -26,7 +26,8 @@ export const CONTRAST=()=>{ // runs in page
   return res;
 };
 export const TAP=()=>{const vis=el=>{const r=el.getBoundingClientRect();if(r.width<1||r.height<1)return false;if(r.bottom<0||r.top>innerHeight)return false;let e=el;while(e&&e.nodeType===1){const cs=getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;e=e.parentElement;}return true};
-  const els=[...document.querySelectorAll('button,a[href],select,input,summary,[role=button],[role=switch],[role=tab],[role=radio],textarea')].filter(vis).filter(e=>!e.classList.contains('skip')&&!(e.tagName==='INPUT'&&e.closest('label.search')));
+  const els=[...document.querySelectorAll('button,a[href],select,input,summary,[role=button],[role=switch],[role=tab],[role=radio],textarea')].filter(vis).filter(e=>!e.classList.contains('skip')&&!e.closest('[data-tap-equiv]')&&!(e.tagName==='INPUT'&&e.closest('label.search')));
+  // [data-tap-equiv]: a canvas shortcut whose 44px equivalent is on screen too (the phone node bar's 收合; WCAG 2.5.8 equivalent-control exception)
   // inputs inside .search labels: measure the label instead
   const labels=[...document.querySelectorAll('label.search')].filter(vis);
   return [...els,...labels].map(e=>{const r=e.getBoundingClientRect();return {el:(e.getAttribute('aria-label')||e.textContent||e.tagName).trim().slice(0,22),w:Math.round(r.width),h:Math.round(r.height)}});};

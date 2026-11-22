@@ -222,9 +222,22 @@ function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id);
 // phones: a small floating bar over the selected node — ✏️ 編輯 opens the editor from a real tap (keyboard shows), ⋯ the node menu
 function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector('.nodetb'); const n=lay&&S.sel&&lay.by.get(S.sel);
   if(!isM()||!n||n.x===undefined||S.editing||S.preview||S.outline||S.relPick||S.view!=='editor'){ tb&&tb.remove(); return; }
-  if(!tb){ o.insertAdjacentHTML('beforeend',`<div class="nodetb" role="toolbar" aria-label="選取的節點"><button class="btn" data-act="edit" aria-label="編輯文字">${I('edit')}<span>編輯</span></button><button class="btn" data-act="nodeMenuTb" aria-label="更多節點動作">${I('more')}</button></div>`); tb=o.querySelector('.nodetb'); }
-  const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, W=o.clientWidth||innerWidth, w=tb.offsetWidth||140; let x=Math.max(8,Math.min(W-w-8,cx-w/2)), y=top-54; if(y<64) y=ty+(n.y+n.h/2)*sc+10;
-  tb.style.left=x+'px'; tb.style.top=y+'px'; }
+  const kids=n.c&&n.c.length?(n.collapsed?'open':'fold'):'', key=kids;
+  if(tb&&tb.dataset.k!==key){ tb.remove(); tb=null; }
+  // v1.8: branches can be folded straight from this bar (the canvas also shows a − toggle on the selected node)
+  if(!tb){ o.insertAdjacentHTML('beforeend',`<div class="nodetb" role="toolbar" aria-label="選取的節點" data-k="${key}"><button class="btn" data-act="edit" aria-label="編輯文字">${I('edit')}<span>編輯</span></button>${kids?`<button class="btn" data-act="collapse" aria-label="${kids==='fold'?'收合子節點':'展開子節點'}">${I(kids==='fold'?'minus':'plus')}<span>${kids==='fold'?'收合':'展開'}</span></button>`:''}<button class="btn" data-act="nodeMenuTb" aria-label="更多節點動作">${I('more')}</button></div>`); tb=o.querySelector('.nodetb'); }
+  const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, bot=ty+(n.y+n.h/2)*sc, W=o.clientWidth||innerWidth, H=o.clientHeight||innerHeight, w=tb.offsetWidth||140, h=tb.offsetHeight||44;
+  // v1.8: never park the bar on top of another node (it used to cover the sibling just above, so that node could not be tapped)
+  const R=[]; for(const m of lay.by.values()){ if(m===n||m.x===undefined) continue; const x0=tx+(m.x-m.w/2)*sc, y0=ty+(m.y-m.h/2)*sc; if(x0>W||y0>H||x0+m.w*sc<0||y0+m.h*sc<0) continue; R.push([x0-4,y0-4,x0+m.w*sc+4,y0+m.h*sc+4]); }
+  const nl=tx+(n.x-n.w/2)*sc, nr=tx+(n.x+n.w/2)*sc, sg=n.side===-1?-1:1, ext=(n.c&&n.c.length?58:36)*sc+8; // the node itself plus its −/+ buttons stay uncovered
+  R.push([sg<0?nl-ext:nl-4,top-4,sg<0?nr+4:nr+ext,bot+4,20]);
+  const cover=(x,y)=>R.reduce((a,[x0,y0,x1,y1,k=1])=>a+k*Math.max(0,Math.min(x+w,x1)-Math.max(x,x0))*Math.max(0,Math.min(y+h,y1)-Math.max(y,y0)),0)+(y<64||y+h>H-8?1e6:0);
+  const cl=x=>Math.max(8,Math.min(W-w-8,x)), mid=(top+bot)/2-h/2;
+  const C=[[cx-w/2,top-h-10],[nl,top-h-10],[nr-w,top-h-10],[cx-w/2,bot+10],[nl,bot+10],[nr-w,bot+10],[sg<0?nr+12:nl-w-12,mid],[sg<0?nl-ext-w-4:nr+ext+4,mid]].map(([x,y])=>[cl(x),y]);
+  let best=null; for(const [x,y] of C){ const c=cover(x,y); if(!best||c<best.c) best={x,y,c}; if(!c) break; }
+  // crowded map (every spot would hide a node): dock the bar at the bottom of the screen instead, above the AI bar
+  if(best.c>0){ const ab=$('#aibar'), oR=o.getBoundingClientRect(), lim=ab&&ab.offsetParent?ab.getBoundingClientRect().top-oR.top:H; best={x:cl(W/2-w/2),y:lim-h-12}; }
+  tb.classList.toggle('docked',best.c===undefined); tb.style.left=best.x+'px'; tb.style.top=Math.max(64,Math.min(H-h-8,best.y))+'px'; }
 function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
   const fs=n.fs||(n.d===0?22:n.d===1?16:14); Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(isM()?16:14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
 function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
@@ -234,8 +247,9 @@ function cancelEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); c
 function nodeAt(e){ let t=e.target; if(t&&t.id==='stage'||t&&t.closest&&!t.closest('#mapsvg')){ const h=document.elementFromPoint(e.clientX,e.clientY); if(h) t=h; } const g=t&&t.closest&&t.closest('g.node'); return g?g.dataset.id:null; }
 function stagePoint(e){ const r=$('#stage').getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
 function worldAt(x,y){ const {tx,ty,sc}=S.vp; return [(x-tx)/sc,(y-ty)/sc]; }
+let lastPtr='mouse';
 function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map(); let pan=null, drag=null, pinch=null, lp=null;
-  st.addEventListener('pointerdown',e=>{ if(e.target.closest('.editbox')||e.target.closest('.nodetb')||e.button===2) return;
+  st.addEventListener('pointerdown',e=>{ lastPtr=e.pointerType||'mouse'; if(e.target.closest('.editbox')||e.target.closest('.nodetb')||e.button===2) return;
     // touch: no compatibility mousedown afterwards, so it can't move focus away from an editor opened by this tap (Android keyboard)
     if(e.pointerType!=='mouse') e.preventDefault(); st.setPointerCapture(e.pointerId); pts.set(e.pointerId,stagePoint(e));
     if(pts.size===2){ const [a,b]=[...pts.values()]; pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),c:[(a[0]+b[0])/2,(a[1]+b[1])/2]}; pan=null; drag=null; clearTimeout(lp); return; }
@@ -260,7 +274,8 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
       else { if(S.editing) commitEdit(); if(S.sel===d.id&&(e.detail>=2||e.pointerType!=='mouse')){ startEdit(d.id); if(e.pointerType==='touch'){ tapOpened=Date.now(); tapPt=[e.clientX,e.clientY]; } } /* touch: tap the selected node again → edit; focus happens inside this gesture so the phone keyboard opens */ else { select(d.id,{scroll:false}); if(!isM()) $('#cv').focus({preventScroll:true}); } } } };
   st.addEventListener('pointerup',end); st.addEventListener('pointercancel',end);
   st.addEventListener('touchend',e=>{ if(Date.now()-tapOpened<400){ e.preventDefault(); dbg('touchend cancelled (tap opened editor)'); } },{passive:false});
-  st.addEventListener('dblclick',e=>{ const id=nodeAt(e); if(id) startEdit(id); });
+  // touch already edits on a second tap; a tap followed by a long press must open the node menu, not a compatibility dblclick editor
+  st.addEventListener('dblclick',e=>{ if(lastPtr!=='mouse'||MENU) return; const id=nodeAt(e); if(id) startEdit(id); });
   st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); const rl=!id&&e.target.closest&&e.target.closest('g.rel'); if(rl){ e.preventDefault(); relClick(rl.dataset.rel,e.clientX,e.clientY); return; } if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
   st.addEventListener('wheel',e=>{ e.preventDefault(); const [x,y]=stagePoint(e); if(e.ctrlKey||e.metaKey) zoomAt(Math.exp(-e.deltaY*.01),x,y); else { S.vp={...S.vp,tx:S.vp.tx-(e.shiftKey?e.deltaY:e.deltaX),ty:S.vp.ty-(e.shiftKey?0:e.deltaY)}; applyVp(); } },{passive:false});
   const ai=$('#aibar'); if(ai){ const q=$('#aiq'), sb=ai.querySelector('.send'); q.addEventListener('input',()=>sb.disabled=!q.value.trim()); ai.addEventListener('submit',e=>{e.preventDefault(); if(q.value.trim()) aiFromBar(q.value.trim());}); } }
@@ -347,6 +362,7 @@ function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChi
 function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   const n=S.unsynced, syncIt=S.remote?mi('syncNow',S.driveAuth||S.sync.state==='error'?'alert':'cloud',S.driveAuth?'重新連結 Google 才能同步':S.sync.state==='saving'?'同步中…':n?`同步（${n} 項未同步）`:'已同步，再同步一次',S.driveAuth||S.sync.state==='error'?'warnit':n?'hasit':'')+'<hr>':'';
   openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">${syncIt}
+  <div class="mrow" role="group" aria-label="復原與重做"><span>編輯</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="undo" aria-label="復原"${S.undo.length?'':' aria-disabled="true"'}>${I('undo')}</button><button role="menuitem" tabindex="-1" data-act="redo" aria-label="重做"${S.redo.length?'':' aria-disabled="true"'}>${I('redo')}</button></div></div>
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
   <hr>${mi('aiSummary','sum','AI 摘要整張圖')}${mi('aiArticle','note','文章轉心智圖（AI）')}${mi('relStart','rel','關聯線（從選取節點）')}<hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
@@ -733,7 +749,7 @@ async function act(a,v,el){ const f=selInfo();
   case 'aibarClose': S.aibar=false; render(); break;
   case 'cfPick': S.dialog.pick=v; drawDialog(); $(`[data-act="cfPick"][data-v="${v}"]`)?.focus(); break;
   case 'cfApply': applyConflict(); break;
-  case 'preview': preview(v); break; case 'endPreview': endPreview(); break; case 'restore': restorePreview(); break;
+  case 'preview': preview(v); break; case 'endPreview': endPreview(); break; case 'restoreVersion': restorePreview(); break;
   case 'promptOk': { const D=S.dialog; const val=D.input!==undefined?$('#pr-in').value:true; D.onClose=null; S.dialog=null; drawDialog(); D.resolve(val); break; }
   case 'cardMenu': openCardMenu(v,el); break;
   case 'openMap': closeMenu(); location.hash='#/map/'+v; break;
