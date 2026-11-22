@@ -1,6 +1,6 @@
 // Read-only viewer for share links (view.html, v1.8). Same layout + renderer as the editor, so the map looks exactly as in
 // the app; viewers can pan, zoom, fold/unfold branches and read notes, but nothing is saved and nothing can be edited.
-import { I, esc, THEMES, DEFAULT_THEME } from './core.js';
+import { I, esc, THEMES, DEFAULT_THEME, isMark, markHtml } from './core.js';
 import { layout, renderMap, allDeep, bounds } from './mapview.js';
 import { loadShared, parseLink } from './share.js';
 const $=s=>document.querySelector(s);
@@ -43,7 +43,7 @@ function toggle(id){ const n=find(V.doc.root,id); if(!n||!n.c||!n.c.length) retu
 function setLevel(l){ (function w(n,d){ if(n.c&&n.c.length){ n.collapsed=!!(l&&d>=l); n.c.forEach(c=>w(c,d+1)); } })(V.doc.root,0); draw(); fit(); closeSheet(); }
 function closeSheet(){ $('.vwsheet')?.remove(); }
 function sheet(id){ const n=find(V.doc.root,id); if(!n) return; closeSheet(); const kids=n.c&&n.c.length; const link=n.link&&/^https?:\/\//i.test(n.link)?n.link:'';
-  $('#vw').insertAdjacentHTML('beforeend',`<section class="vwsheet" role="dialog" aria-label="節點內容"><div class="hd"><h3>${esc(n.icon?n.icon+' ':'')}${esc(n.t)}</h3><button class="x" data-a="closeSheet" aria-label="關閉">${I('x')}</button></div>${n.note?`<p class="note">${esc(n.note)}</p>`:''}${link?`<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${I('link')}${esc(link)}</a>`:''}${kids?`<div class="acts"><button class="btn" data-a="toggle" data-v="${esc(n.id)}">${I(n.collapsed?'plus':'minus')}${n.collapsed?'展開子節點':'收合子節點'}</button></div>`:''}</section>`); }
+  $('#vw').insertAdjacentHTML('beforeend',`<section class="vwsheet" role="dialog" aria-label="節點內容"><div class="hd"><h3>${n.icon?(isMark(n.icon)?markHtml(n.icon,20)+' ':esc(n.icon+' ')):''}${esc(n.t)}</h3><button class="x" data-a="closeSheet" aria-label="關閉">${I('x')}</button></div>${n.note?`<p class="note">${esc(n.note)}</p>`:''}${link?`<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${I('link')}${esc(link)}</a>`:''}${kids?`<div class="acts"><button class="btn" data-a="toggle" data-v="${esc(n.id)}">${I(n.collapsed?'plus':'minus')}${n.collapsed?'展開子節點':'收合子節點'}</button></div>`:''}</section>`); }
 function bind(){ const st=$('#stage'), pts=new Map(); let pan=null, pinch=null, down=null;
   const P=e=>{ const r=st.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; };
   st.addEventListener('pointerdown',e=>{ if(e.button===2) return; e.preventDefault(); st.setPointerCapture(e.pointerId); pts.set(e.pointerId,P(e));

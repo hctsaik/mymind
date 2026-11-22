@@ -4,7 +4,7 @@
 // (stub, spine, corner radius ≤17 with the .552/.75 smoothing), parent anchored on its children's first/last
 // mid-point snapping to a middle child (or pair) within 12px, drag offsets applied after centring, any number of lines.
 // Pure functions: data in, SVG string out. Only used when a theme sets engine:'classic'.
-import { esc } from './core.js';
+import { esc, isMark, markInner, qsLook } from './core.js';
 const mctx=document.createElement('canvas').getContext('2d');
 export const CFF='"PingFang SC","MMC Open Sans","MMC Han Sans"';
 // fonts: PingFang SC where the system has it (Apple), else Open Sans + Noto Sans SC (css/classic-fonts.css, loaded on first use).
@@ -56,6 +56,7 @@ function styleFor(n,d,br,S){ const L=S.lv[Math.min(d,2)]; const s={...L};
     if(S.multi.conn!==false){ s.cc=c; if(!isNone(s.stroke)||d>=1) s.stroke=c; }
     if(d===1&&S.multi.fill) s.fill=c; }
   if(n.gs&&typeof n.gs==='object') Object.assign(s,n.gs);
+  if(n.qs){ const Q=qsLook(n.qs,/^#[0-9a-f]{6}$/i.test(S.bg)?S.bg:'#FFFFFF',s.color); if(Q){ s.fill=Q.fill; s.stroke=Q.kind==='under'?Q.under:Q.stroke; s.sw=Q.kind==='under'?3:Q.sw; s.color=Q.text; s.fw=Q.fw>=600?'bold':'normal'; s.dash=Q.dash||''; if(Q.kind==='under') s.shape='underline'; else if(s.shape==='underline') s.shape='rect'; if(Q.pill) s.r=999; else if(!(+s.r>0)) s.r=6; s.qs=1; } } // v1.8.2 quick style
   if(n.shape==='arc'&&!(n.gs&&n.gs.shape)) s.shape='arc-sides-rect';
   return s; }
 // text wrapping at the map's text width limit, measured by the browser's own line breaking (same rules as HTML text)
@@ -207,7 +208,7 @@ function textSvg(n,s,left,top,fill){ const F=n.font, M=metrics(F), lh=n.lhC, bas
 function shapePath(n,s){ if(n.arc) return arcSides(n.x,n.y,n.w,n.h,+s.r||0); const r=Math.max(0,+s.r||0); return r?smoothRect(n.x,n.y,n.w,n.h,r):`M${F3(n.x-n.w/2)} ${F3(n.y-n.h/2)} h${F3(n.w)} v${F3(n.h)} h${F3(-n.w)} Z`; }
 const LINK_P='<path stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" d="M2.8,0.3l2.5-2.5c0.8-0.9,0.8-2.3,0-3.1C4.5-6.2,3.1-6.2,2.2-5.4l-2.9,2.9c-0.8,0.9-0.8,2.3,0.1,3.1"/><path stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" d="M0.7-0.7c0.9,0.9,0.8,2.3,0,3.2l-2.9,2.9c-0.9,0.8-2.3,0.8-3.1,0c-0.9-0.9-0.9-2.3,0-3.1l2.5-2.5"/>';
 export function clNodeSvg(n,th,root){ const S=(root&&root.spec)||DEFSPEC, s=n.st||S.lv[Math.min(n.d,2)], d=n.d, x=n.x-n.w/2, y=n.y-n.h/2; let g='';
-  const legacy=S===DEFSPEC; // the built-in peach look keeps its theme colours
+  const legacy=S===DEFSPEC&&!s.qs; // the built-in peach look keeps its theme colours (unless the node has a quick style)
   const fill=legacy?(d===0?th.root:d===1?'#FFFFFF':'transparent'):s.fill, stroke=legacy?(d===1?th.l1Stroke:'none'):s.stroke, sw=+s.sw||0;
   const vis=!isNone(fill)||(!isNone(stroke)&&sw>0);
   g+=`<rect class="hit" x="${F3(x)}" y="${F3(y)}" width="${F3(n.w)}" height="${F3(n.h)}" fill="transparent" stroke="none"/>`;
@@ -219,7 +220,7 @@ export function clNodeSvg(n,th,root){ const S=(root&&root.spec)||DEFSPEC, s=n.st
   const rowW=n.rowW, left=med?n.x-rowW/2:n.arc?n.x-n.cw/2:x+n.padX; let cx=left;
   if(n.pri){ const B=priB(s.fs), bx=cx; g+=`<g data-g="badge"><circle cx="${F3(bx+B/2)}" cy="${F3(rowY)}" r="${F3((B-1)/2)}" fill="${PRI_C[(n.pri-1)%PRI_C.length]}" stroke="#FFFFFF" stroke-width="${F3(B/18)}"/><text x="${F3(bx+B/2)}" y="${F3(rowY+4)}" text-anchor="middle" fill="#FFFFFF" style="font-weight:bold;font-family:Arial;font-size:${F3(B*.625)}px">${n.pri}</text></g>`; cx+=B+BGAP; }
   const icons=Array.isArray(n.gi)?n.gi:[];
-  if(n.icon&&!icons.length){ const st=stickerOf(n.icon), ix=cx, iy=rowY-21/2;
+  if(n.icon&&!icons.length){ const st=stickerOf(n.icon)||(isMark(n.icon)?markInner(n.icon):null), ix=cx, iy=rowY-21/2;
     g+=st?`<g data-g="icon" transform="translate(${F3(ix)} ${F3(iy)}) scale(${21/24})" aria-hidden="true">${st}</g>`:`<text x="${F3(ix)}" y="${F3(rowY+s.fs*.36)}" font-size="${s.fs}" aria-hidden="true">${esc(n.icon)}</text>`; cx+=21+ICON_GAP; }
   icons.forEach(k=>{ const src=S.assets[k]; const B=n.ic; if(src) g+=`<image data-g="icon" href="${XC(src)}" x="${F3(cx+2)}" y="${F3(rowY-B/2+2)}" width="${B-4}" height="${B-4}"/>`; cx+=B+ICON_GAP; });
   const tc=legacy?(d===0?th.rootText:th.text):s.color;

@@ -1,5 +1,6 @@
 // Import / export: Markdown outline, OPML, .mymind.json, PNG/SVG.
 import { newId } from './store.js';
+import { markText } from './core.js';
 const withIds=n=>({id:newId(),t:n.t,...(n.note?{note:n.note}:{}),...(n.c&&n.c.length?{c:n.c.map(withIds)}:{})});
 // ---------- Markdown ----------
 // Inline markdown → plain node text. Links keep their text; URLs are returned so the caller can keep them (in the note).
@@ -52,7 +53,7 @@ const escLine=t=>escInline(String(t||'').replace(/\s+/g,' ').trim()).replace(/(\
 const noteLines=(note,ind)=>String(note).split('\n').filter(x=>x.trim()).map(x=>`${ind}> ${x.trim()}`);
 const tagsOfN=n=>Array.isArray(n.tags)?n.tags:(n.tag?[n.tag]:[]);
 // one node → its Markdown line: "icon [text](link) #tag #tag"
-function lineOf(n){ const txt=escLine(n.t); const body=n.link?`[${txt.replace(/\]/g,'\\]')}](${String(n.link).replace(/[()\s]/g,c=>encodeURIComponent(c))})`:txt; return `${n.icon?n.icon+' ':''}${body}${tagsOfN(n).map(t=>' #'+t).join('')}`; }
+function lineOf(n){ const txt=escLine(n.t); const body=n.link?`[${txt.replace(/\]/g,'\\]')}](${String(n.link).replace(/[()\s]/g,c=>encodeURIComponent(c))})`:txt; return `${n.icon?markText(n.icon)+' ':''}${body}${tagsOfN(n).map(t=>' #'+t).join('')}`; }
 // image (web address only; images pasted into the map are too big for Markdown) + note lines under a node
 let OUT=null; function extras(n,ind){ if(n.img&&/^https?:/i.test(n.img.src)) OUT.push(`${ind}![${(n.img.alt||'').replace(/[\[\]]/g,'')}](${n.img.src})`); if(n.note) OUT.push(...noteLines(n.note,ind)); }
 // Map/subtree → Markdown. Root: "# title"; descendants: nested "- " lists (2 spaces), done → "- [x]", notes → "> " lines.

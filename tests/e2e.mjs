@@ -493,8 +493,8 @@ const nodes=p=>p.locator('#mapsvg g.node').count();
     ok('mobile export menu has PDF', await p.locator('[data-act="exp"][data-v="pdf"]').count()===1);
     await p.screenshot({path:SHOTS+'/34-export-menu-mobile.png'}); await p.keyboard.press('Escape'); await W(100);
     }
-  ok('AI bar with × inside', await p.locator('#aiq').count()===1&&await p.locator('[data-act="aibarClose"]').count()===1);
-  await p.click('[data-act="aibarClose"]'); await W(100); ok('AI bar closes', await p.locator('#aiq').count()===0);
+  ok('no bottom AI command bar on the phone (v1.8.1)', await p.locator('#aibar,#aiq').count()===0&&!(await p.content()).includes('請輸入你的需求'));
+  ok('AI stays reachable from the top bar on the phone', await p.locator('.top [data-act="ai"].mobile-only').isVisible());
   await p.click('[data-act="style"].mobile-only'); await W(250); await p.screenshot({path:SHOTS+'/14-style-mobile.png'});
   ok('mobile style sheet opens', await p.locator('[role=tabpanel]').count()>=1);
   await p.goto(BASE+'#/'); await W(200); await p.screenshot({path:SHOTS+'/15-list-mobile.png'});

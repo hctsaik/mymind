@@ -14,7 +14,7 @@ export const P={
  cloud:'M7 18a5 5 0 0 1-.9-9.9A6 6 0 0 1 17.7 9 4.5 4.5 0 0 1 17 18zM9 13l2 2 4-4', more:'M5 12h.01M12 12h.01M19 12h.01',
  key:'M15 7a4 4 0 1 1-3.9 4.9L4 19v2h3v-2h2v-2h2l1.1-1.1A4 4 0 0 1 15 7zM16 9h.01', lock:'M6 11h12v10H6zM8 11V8a4 4 0 0 1 8 0v3',
  edit:'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', git:'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
- folder:'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', copy:'M9 9h11v11H9zM5 15H4V4h11v1', image:'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01',
+ folder:'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', copy:'M9 9h11v11H9zM5 15H4V4h11v1', paste:'M9 4h6v3H9zM7 5H5v16h14V5h-2M9 12h6M9 16h4', image:'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01',
  back:'M15 18l-6-6 6-6', chevD:'M6 9l6 6 6-6', info:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5h.01', ext:'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
  kb:'M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M7 14h10', alert:'M12 3l10 18H2zM12 10v5M12 18h.01', laptop:'M4 5h16v11H4zM2 19h20', merge:'M6 3v6a6 6 0 0 0 6 6h6M18 21v-6M6 21v-4',
  share:'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4', eye:'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'
@@ -44,4 +44,39 @@ export const THEMES={
  classic:{rel:'#0F7B8A',name:'經典蜜桃',engine:'classic',root:'#FFBB91',rootText:'#FFFFFF',rootPill:true,flatRoot:true,br:['#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E','#FF8E6E'],l1:'box',l1Stroke:'#FFBB91',deep:'plain',edge:'bracket',line:'#FF8E6E',lineLight:'#FF8E6E',lw:2,hl:'#FFE27A',text:'#000000',canvas:'#FFF1E6',dot:'#FFF1E6'},
  minimal:{rel:'#0F7B8A',name:'極簡',root:'#111111',rootText:'#FFFFFF',br:['#111111','#3A3A3A','#111111','#3A3A3A','#111111','#3A3A3A'],l1:'outline',text:'#111111',canvas:'#FFFFFF',dot:'#E5E5E5'}
 };
-export const PRI={1:'#C53030',2:'#B45309',3:'#3F51E8',4:'#0E7A56',5:'#57534E'};
+export const PRI={1:'#C53030',2:'#B45309',3:'#3F51E8',4:'#0E7A56',5:'#57534E',6:'#7C3AED',7:'#0369A1',8:'#BE185D',9:'#4D7C0F'};
+// ---------- v1.8.1 vector marks for node icons (offline; drawn as SVG so PNG/SVG/PDF export and the share viewer look the same) ----------
+// A node's icon is either an emoji or a token "mm:<kind>:<value>": flag / star (colour), prog (0–100), mon (1–12), wd (一…日).
+export const MARK_COLORS={red:'#E5484D',orange:'#F76B15',yellow:'#F5B000',green:'#30A46C',blue:'#3E63DD',purple:'#8E4EC6',gray:'#7C7F8A'};
+export const MARK_CN={red:'紅',orange:'橙',yellow:'黃',green:'綠',blue:'藍',purple:'紫',gray:'灰'};
+export const isMark=t=>/^mm:(flag|star|prog|mon|wd):/.test(String(t||''));
+export function markInner(t){ const [,k,v]=String(t).split(':'), c=MARK_COLORS[v]||'#3E63DD';
+  if(k==='flag') return `<path d="M5.5 3v18.2" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><path d="M6.6 3.8h11.6l-2.8 4.3 2.8 4.3H6.6z" fill="${c}"/>`;
+  if(k==='star') return `<path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.4L12 17.4l-5.8 3 1.1-6.4-4.7-4.6 6.5-.9z" fill="${c}" stroke="${c}" stroke-width="1" stroke-linejoin="round"/>`;
+  if(k==='prog'){ const p=Math.max(0,Math.min(100,+v||0)), a=p/100*2*Math.PI, x=12+9*Math.sin(a), y=12-9*Math.cos(a);
+    const pie=p>=100?`<circle cx="12" cy="12" r="9" fill="#30A46C"/><path d="M7.6 12.2l3 3 5.8-6.2" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
+      :p<=0?'':`<path d="M12 12V3A9 9 0 ${p>50?1:0} 1 ${x.toFixed(2)} ${y.toFixed(2)}z" fill="#3E63DD"/>`;
+    return `<circle cx="12" cy="12" r="10" fill="#fff" stroke="${p>=100?'#30A46C':'#3E63DD'}" stroke-width="2"/>${pie}`; }
+  if(k==='mon'||k==='wd'){ const txt=k==='mon'?String(+v||1):String(v||'一').slice(0,1), top=k==='mon'?'#E5484D':'#3E63DD';
+    return `<rect x="2.5" y="3.5" width="19" height="18" rx="3.5" fill="#fff" stroke="${top}" stroke-width="1.6"/><path d="M2.5 7a3.5 3.5 0 0 1 3.5-3.5h12A3.5 3.5 0 0 1 21.5 7v2h-19z" fill="${top}"/><text x="12" y="18.6" text-anchor="middle" font-size="${txt.length>1?9:10.5}" font-weight="700" fill="#1F2329" font-family="system-ui,sans-serif">${txt}</text>`; }
+  return ''; }
+export const markHtml=(t,s=20)=>`<svg class="mark" viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${markInner(t)}</svg>`;
+export function markLabel(t){ const [,k,v]=String(t).split(':'); return k==='flag'?`${MARK_CN[v]||''}旗`:k==='star'?`${MARK_CN[v]||''}星`:k==='prog'?`進度 ${+v}%`:k==='mon'?`${+v}月`:k==='wd'?`週${v}`:''; }
+// plain-text stand-in (Markdown, titles): emoji where one exists
+export function markText(t){ if(!isMark(t)) return t||''; const [,k,v]=String(t).split(':'); return k==='flag'?'🚩':k==='star'?'⭐':k==='prog'?(+v>=100?'✅':`◔${+v}%`):k==='mon'?`📅${+v}月`:`📅週${v}`; }
+// ---------- v1.8.2 quick styles (快速樣式): one tap sets fill, border, text colour, weight and shape together ----------
+// Stored as n.qs = key; the look is worked out for the canvas it sits on, so it stays readable (AA) on every theme.
+export const QS=[['key','重點','#D93025','tint'],['concl','結論','#3E63DD','solid'],['ques','問題','#E8590C','dash'],['todo','待辦','#B7791F','note'],
+  ['done','完成','#2F9E44','tint'],['fade','淡化','#8B8D98','fade'],['tag','標籤','#8E4EC6','pill'],['under','底線','#3E63DD','under'],['frame','粗框','#1F2329','thick'],['alert','警示','#C92A2A','solid']];
+export function qsLook(key,CV='#FFFFFF',text='#1F2329'){ const q=QS.find(x=>x[0]===key); if(!q||!/^#[0-9a-f]{6}$/i.test(CV)) return null; const [,,c0,kind]=q, dark=lum(CV)<.35;
+  const c=dark&&lum(c0)<.08?'#E6E8EC':c0, T=/^#[0-9a-f]{6}$/i.test(text)?text:(dark?'#E6E8EC':'#1F2329'); const L={kind,fw:700,dash:'',under:'',pill:false,sw:0,stroke:'none',fill:'none'};
+  const solid=()=>{ let f=c; for(let t=0;cr('#FFFFFF',f)<4.6&&t<=1;t+=.04) f=mix(c,'#000000',t); L.fill=f; L.text='#FFFFFF'; };
+  if(kind==='tint'){ L.fill=tint(c,dark?.26:.13,CV); L.stroke=readable(c,CV,3); L.sw=1.6; L.text=readable(c,L.fill,4.6); }
+  else if(kind==='solid') solid();
+  else if(kind==='pill'){ solid(); L.pill=true; }
+  else if(kind==='dash'){ L.fill=tint(c,dark?.2:.08,CV); L.stroke=readable(c,CV,3); L.sw=1.6; L.dash='5 4'; L.text=readable(c,L.fill,4.6); }
+  else if(kind==='note'){ L.fill=dark?'#4A4220':'#FFF3BF'; L.stroke=readable(dark?'#C9A227':'#E0B400',CV,3); L.sw=1.2; L.text=readable(dark?'#FFE8A3':'#5C3D00',L.fill,4.6); }
+  else if(kind==='fade'){ L.fw=400; L.text=readable(mix(T,CV,.42),CV,4.6); }
+  else if(kind==='under'){ L.under=readable(c,CV,3); L.text=readable(T,CV,4.6); }
+  else if(kind==='thick'){ L.fill=dark?'#1E2128':'#FFFFFF'; L.stroke=readable(c,CV,3); L.sw=3; L.text=readable(T,L.fill,4.6); }
+  return L; }

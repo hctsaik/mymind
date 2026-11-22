@@ -13,7 +13,7 @@ import { VERSION } from './version.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const P0=prefs.get();
 const S={view:'list',filter:'all',q:'',sideQ:'',sort:'updated',mapId:null,doc:null,sel:null,panel:'',tab:'theme',outline:false,
-  minimap:P0.minimap,hints:P0.hints,aibar:true,mode:P0.mode,syncMode:P0.sync,remote:false,unsynced:0,repo:P0.repo,model:P0.model,lines:P0.lines,
+  minimap:P0.minimap,hints:P0.hints,mode:P0.mode,syncMode:P0.sync,remote:false,unsynced:0,repo:P0.repo,model:P0.model,lines:P0.lines,
   sync:{state:'saved',at:null,msg:''},hist:{items:[],loading:false,error:''},preview:null,undo:[],redo:[],vp:null,dialog:null,editing:null};
 window.__mm=S; // for tests/debugging (contains no secrets)
 const ensureIds=n=>{if(!n.id)n.id=newId();(n.c||[]).forEach(ensureIds);return n;};
@@ -59,6 +59,17 @@ function moveNode(id,targetId,where){ if(id===targetId) return; const r0=S.doc.r
 function reorder(dir){ const f=selInfo(); if(!f||!f.parent) return; const j=f.idx+dir; if(j<0||j>=f.parent.c.length) return; mutate(r=>{const p=find(r,f.parent.id).n; const [x]=p.c.splice(f.idx,1); p.c.splice(j,0,x);}); }
 function toggleCollapse(id){ const f=id?find(S.doc.root,id):selInfo(); if(!f||!f.n.c||!f.n.c.length) return; mutate(r=>{const x=find(r,f.n.id).n; x.collapsed=!x.collapsed;}); }
 function setLevel(l){ mutate(r=>{(function w(n,d){ if(n.c&&n.c.length){ n.collapsed=!!(l&&d>=l); n.c.forEach(c=>w(c,d+1)); } })(r,0);}); }
+// v1.8.1: 全部展開 / 全部收合 for the whole map (the root's first level stays visible) or one node's subtree; one undo step each
+function visibleSel(r){ const f=S.sel&&find(r,S.sel); if(!f) return r.id; let id=S.sel, hidden=null; for(let p=f.parent?find(r,f.parent.id):null; p; p=p.parent?find(r,p.parent.id):null){ if(p.n.collapsed) hidden=p.n.id; } return hidden||id; }
+function foldAll(open,id){ if(!S.doc) return; const base=id?find(S.doc.root,id):{n:S.doc.root}; if(!base) return; const branches=allDeep(base.n).filter(n=>n.c&&n.c.length);
+  if(!branches.length) return toast('這個節點沒有子節點');
+  const changed=open?branches.some(n=>n.collapsed):branches.some(n=>n!==base.n?!n.collapsed:false)||(!id?false:branches.length===1&&!base.n.collapsed);
+  if(!changed) return toast(open?'已經全部展開':'已經全部收合');
+  mutate(r=>{ const b=id?find(r,id).n:r; const all=allDeep(b).filter(n=>n.c&&n.c.length), deep=all.filter(n=>n!==b);
+    if(open) all.forEach(n=>{ delete n.collapsed; });
+    else { b.collapsed=false; deep.forEach(n=>n.collapsed=true); if(!deep.length&&id) b.collapsed=true; } // only leaves below: fold the node itself
+    S.sel=visibleSel(r); });
+  toast(open?(id?'已展開全部子節點':'已全部展開'):(id?'已收合全部子節點':'已全部收合（保留第一層）')); }
 function setField(k,v){ const f=selInfo(); if(!f) return toast('先選一個節點'); mutate(r=>{const x=find(r,f.n.id).n; if(v===undefined||v===''||v===0||v===false||v==='none') delete x[k]; else x[k]=v;}); }
 // ---------- routing ----------
 function route(){ const h=location.hash.replace(/^#\/?/,''); const [a,b]=h.split('/');
@@ -76,7 +87,7 @@ function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main')
   app.classList.remove('nosidebar'); side.innerHTML=V.sidebar(S,maps.index());
   if(S.view==='list'){ shellKey=''; main.innerHTML=V.home(S,maps.index(),id=>maps.load(id)); $('#skip').href='#content'; $('#skip').textContent='跳到內容'; }
   else if(S.view==='editor'){ $('#skip').href='#cv'; $('#skip').textContent='跳到畫布';
-    const key=[S.mapId,S.panel,S.outline,isM(),S.minimap,S.hints,S.aibar,!!S.preview].join('|');
+    const key=[S.mapId,S.panel,S.outline,isM(),S.minimap,S.hints,!!S.preview].join('|');
     if(key!==shellKey){ if(S.editing) commitEdit(); main.innerHTML=V.editorShell(S,S.doc,curName()); main.style.setProperty('--cv-main',th().canvas); shellKey=key; bindStage(); drawAll(true); }
     else drawAll(); }
   drawDialog(); }
@@ -124,7 +135,7 @@ function drawMap(first){ const vp=$('#vp'); if(!vp) return; lay=laidOut(); const
   $$('.levels button').forEach(x=>x.setAttribute('aria-pressed','false')); }
 function applyVp(){ const vp=$('#vp'); if(!vp) return; const {tx,ty,sc}=S.vp; vp.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); const p=$('#pct'); if(p) p.textContent=Math.round(sc*100)+'%'; window.__VIEW=S.vp; clampRelLabels(); positionEditor(); updateMinimapVp(); }
 // v1.5 review: keep relationship-line labels inside the visible canvas (8px margin; clear of the phone top bar / bottom bar)
-function clampRelLabels(){ const st=$('#stage'); if(!st) return; const L=st.querySelectorAll('#mapsvg g.rellbl'); if(!L.length) return; const R=st.getBoundingClientRect(), sc=S.vp.sc, M=8, top=R.top+(isM()?72:M), bot=R.bottom-(isM()?96:M);
+function clampRelLabels(){ const st=$('#stage'); if(!st) return; const L=st.querySelectorAll('#mapsvg g.rellbl'); if(!L.length) return; const R=st.getBoundingClientRect(), sc=S.vp.sc, M=8, top=R.top+(isM()?72:M), bot=R.bottom-(isM()?24:M);
   L.forEach(g=>{ g.removeAttribute('transform'); const b=g.getBoundingClientRect(); if(!b.width) return; let dx=0,dy=0;
     if(b.right>R.right-M) dx=R.right-M-b.right; if(b.left+dx<R.left+M) dx=R.left+M-b.left; if(b.bottom>bot) dy=bot-b.bottom; if(b.top+dy<top) dy=top-b.top;
     // only nudge labels whose line is at least partly on screen (a fully off-screen line keeps its label with it)
@@ -177,7 +188,7 @@ async function shrinkImage(blob){ if(blob.size>8*1024*1024) throw new Error('圖
     for(const q of [.85,.72,.6]){ const url=c.toDataURL('image/jpeg',q); if(url.length*3/4<=IMG_LIMIT) return {src:url,w,h}; } w=Math.round(w*.8); h=Math.round(h*.8); }
   throw new Error('圖片太大，無法壓到 150 KB'); }
 async function setImageFromBlob(id,blob){ try{ const img=await shrinkImage(blob); mutate(r=>{ const x=find(r,id); if(x) x.n.img=img; }); S.imgErr=''; panelRefresh(); toast(`已加入圖片（${Math.round(img.src.length*3/4/1024)} KB）`,['復原','undo']); }catch(e){ S.imgErr=e.message; panelRefresh(); toast(e.message); } }
-function openIcons(){ const f=selInfo(); if(!f) return toast('先選一個節點'); openDialog({type:'emoji',nodeId:f.n.id,nodeT:f.n.t,cat:V.emojiCatOf(f.n.icon),q:'',focus:'#emgrid .emb[tabindex="0"]'}); }
+function openIcons(){ const f=selInfo(); if(!f) return toast('先選一個節點'); openDialog({type:'emoji',nodeId:f.n.id,nodeT:f.n.t,pri:f.n.pri||0,cat:V.emojiCatOf(f.n.icon),q:'',focus:'#emgrid .emb[tabindex="0"]'}); }
 // ---------- node search (v1.3) ----------
 const norm=t=>String(t||'').normalize('NFKC').toLowerCase();
 function findHits(){ const F=S.find, q=F&&norm(F.q.trim()); if(!q) return []; const doc=S.preview?S.preview.doc:S.doc; return allDeep(doc.root).filter(n=>norm(n.t).includes(q)||norm(n.note).includes(q)).map(n=>n.id); }
@@ -208,12 +219,12 @@ function afterEdit(){ if(!resizePending) return; resizePending=false; clearTimeo
   if(Math.hypot(e.clientX-tapPt[0],e.clientY-tapPt[1])>40) return; e.preventDefault(); e.stopPropagation(); dbg(t+' ignored (just opened editor)'); },true));
 function startEdit(id,isNew){ if(S.preview) return; const n=lay&&lay.by.get(id); if(!n) { drawMap(); }
   S.editing={id,isNew,orig:find(S.doc.root,id).n.t}; ensureVisible(id); const o=$('#ovl'); o.querySelector('.editbox')?.remove();
-  const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; ta.setAttribute('enterkeyhint','done'); o.appendChild(ta); edEl=ta; editAt=Date.now(); positionEditor(); ta.focus({preventScroll:true}); ta.select(); dbg('editor open #'+id+(navigator.userActivation?' activation='+navigator.userActivation.isActive:''));
+  const ta=document.createElement('textarea'); ta.className='editbox'; ta.value=S.editing.orig; ta.setAttribute('aria-label','編輯節點文字（Enter 完成，Shift+Enter 換行，Esc 取消）'); ta.rows=1; ta.setAttribute('enterkeyhint','done'); o.appendChild(ta); edEl=ta; editAt=Date.now(); positionEditor(); ta.focus({preventScroll:true}); ta.select(); keepEditorInView(); setTimeout(()=>{ if(edEl===ta){ positionEditor(); keepEditorInView(); } },350); dbg('editor open #'+id+(navigator.userActivation?' activation='+navigator.userActivation.isActive:''));
   ta.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.isComposing||e.keyCode===229) return;
     if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();commitEdit();$('#cv').focus();}
     else if(e.key==='Escape'){e.preventDefault();cancelEdit();}
     else if(e.key==='Tab'){e.preventDefault();commitEdit();if(e.shiftKey)outdent();else addChild();} });
-  ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';});
+  ta.addEventListener('input',()=>{ sizeEditor(ta); keepEditorInView(); });
   // v1.3.3: commit on blur only when focus truly went somewhere else. Android blurs transiently while Gboard opens,
   // when the app/notification shade takes focus, or when a stray compat event lands on the canvas → refocus instead.
   ta.addEventListener('blur',()=>setTimeout(()=>{ if(!S.editing||S.editing.id!==id||edEl!==ta) return; const a=document.activeElement; if(a===ta) return;
@@ -227,7 +238,7 @@ function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector(
   if(tb&&tb.dataset.k!==key){ tb.remove(); tb=null; }
   // v1.8: branches can be folded straight from this bar (the canvas also shows a − toggle on the selected node)
   if(!tb){ o.insertAdjacentHTML('beforeend',`<div class="nodetb" role="toolbar" aria-label="選取的節點" data-k="${key}"><button class="btn" data-act="edit" aria-label="編輯文字">${I('edit')}<span>編輯</span></button>${kids?`<button class="btn" data-act="collapse" aria-label="${kids==='fold'?'收合子節點':'展開子節點'}">${I(kids==='fold'?'minus':'plus')}<span>${kids==='fold'?'收合':'展開'}</span></button>`:''}<button class="btn" data-act="nodeMenuTb" aria-label="更多節點動作">${I('more')}</button></div>`); tb=o.querySelector('.nodetb'); }
-  const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, bot=ty+(n.y+n.h/2)*sc, W=o.clientWidth||innerWidth, H=o.clientHeight||innerHeight, w=tb.offsetWidth||140, h=tb.offsetHeight||44;
+  const {tx,ty,sc}=S.vp, cx=tx+n.x*sc, top=ty+(n.y-n.h/2)*sc, bot=ty+(n.y+n.h/2)*sc, W=o.clientWidth||innerWidth, vv=window.visualViewport, H=Math.min(o.clientHeight||innerHeight,(vv?vv.offsetTop+vv.height:innerHeight)-Math.max(0,o.getBoundingClientRect().top)), w=tb.offsetWidth||140, h=tb.offsetHeight||44;
   // v1.8: never park the bar on top of another node (it used to cover the sibling just above, so that node could not be tapped)
   const R=[]; for(const m of lay.by.values()){ if(m===n||m.x===undefined) continue; const x0=tx+(m.x-m.w/2)*sc, y0=ty+(m.y-m.h/2)*sc; if(x0>W||y0>H||x0+m.w*sc<0||y0+m.h*sc<0) continue; R.push([x0-4,y0-4,x0+m.w*sc+4,y0+m.h*sc+4]); }
   const nl=tx+(n.x-n.w/2)*sc, nr=tx+(n.x+n.w/2)*sc, sg=n.side===-1?-1:1, ext=(n.c&&n.c.length?58:36)*sc+8; // the node itself plus its −/+ buttons stay uncovered
@@ -236,11 +247,19 @@ function drawNodeTb(){ const o=$('#ovl'); if(!o) return; let tb=o.querySelector(
   const cl=x=>Math.max(8,Math.min(W-w-8,x)), mid=(top+bot)/2-h/2;
   const C=[[cx-w/2,top-h-10],[nl,top-h-10],[nr-w,top-h-10],[cx-w/2,bot+10],[nl,bot+10],[nr-w,bot+10],[sg<0?nr+12:nl-w-12,mid],[sg<0?nl-ext-w-4:nr+ext+4,mid]].map(([x,y])=>[cl(x),y]);
   let best=null; for(const [x,y] of C){ const c=cover(x,y); if(!best||c<best.c) best={x,y,c}; if(!c) break; }
-  // crowded map (every spot would hide a node): dock the bar at the bottom of the screen instead, above the AI bar
-  if(best.c>0){ const ab=$('#aibar'), oR=o.getBoundingClientRect(), lim=ab&&ab.offsetParent?ab.getBoundingClientRect().top-oR.top:H; best={x:cl(W/2-w/2),y:lim-h-12}; }
+  // crowded map (every spot would hide a node): dock the bar at the bottom of the visible screen instead
+  if(best.c>0) best={x:cl(W/2-w/2),y:H-h-16};
   tb.classList.toggle('docked',best.c===undefined); tb.style.left=best.x+'px'; tb.style.top=Math.max(64,Math.min(H-h-8,best.y))+'px'; }
+// v1.8.1: the editor grows to show all of the text (long multi-line nodes used to be cut off after a few lines on phones),
+// wraps at a comfortable width, and only scrolls inside past the space left above the on-screen keyboard (visualViewport)
 function positionEditor(){ drawNodeTb(); const ta=document.querySelector('#ovl .editbox'); if(!ta||!S.editing||!lay) return; const n=lay.by.get(S.editing.id); if(!n) return; const {tx,ty,sc}=S.vp;
-  const fs=n.fs||(n.d===0?22:n.d===1?16:14); Object.assign(ta.style,{left:(tx+(n.x-n.w/2)*sc)+'px',top:(ty+(n.y-n.h/2)*sc)+'px',minWidth:Math.max(120,n.w*sc)+'px',minHeight:(n.h*sc)+'px',fontSize:Math.max(isM()?16:14,fs*sc)+'px',fontWeight:n.d<=1?700:400}); }
+  const st=$('#stage'), sr=st?st.getBoundingClientRect():{left:0,top:0,width:innerWidth,height:innerHeight}, W=sr.width||innerWidth, m=isM(), E=12;
+  const fs=Math.max(m?16:14,(n.fs||(n.d===0?22:n.d===1?16:14))*sc), nw=n.w*sc, maxW=Math.max(120,W-2*E);
+  const w=Math.min(maxW,Math.max(120,nw,m?Math.min(280,maxW):0)); let left=tx+(n.x-n.w/2)*sc; if(nw<w) left-=(w-nw)/2; left=Math.max(E,Math.min(W-E-w,left));
+  Object.assign(ta.style,{left:left+'px',top:(ty+(n.y-n.h/2)*sc)+'px',width:w+'px',minWidth:'',minHeight:Math.min(n.h*sc,240)+'px',fontSize:fs+'px',fontWeight:n.d<=1?700:400});
+  sizeEditor(ta); }
+function editorRoom(){ const vv=window.visualViewport, st=$('#stage'), sr=st?st.getBoundingClientRect():{top:0}, top=Math.max(sr.top,0)+(isM()?72:8), bottom=(vv?vv.offsetTop+vv.height:innerHeight)-12; return Math.max(80,bottom-top); }
+function sizeEditor(ta){ ta.style.height='auto'; const need=ta.scrollHeight+2, max=editorRoom(), h=Math.min(need,max); ta.style.height=h+'px'; ta.style.overflowY=need>max?'auto':'hidden'; }
 function commitEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); if(!ta||!S.editing) return; const v=ta.value.trim()||S.editing.orig||'新主題'; const id=S.editing.id; const orig=S.editing.orig; S.editing=null; edEl=null; ta.remove(); dbg('editor commit');
   if(v!==orig){ S.undo.push('__skip'); S.undo.pop(); mutate(r=>{find(r,id).n.t=v;}); } else drawMap(); afterEdit(); }
 function cancelEdit(){ const ta=edEl||document.querySelector('#ovl .editbox'); const e=S.editing; S.editing=null; edEl=null; ta&&ta.remove(); dbg('editor cancel'); afterEdit(); if(e&&e.isNew&&S.undo.length){ S.doc.root=JSON.parse(S.undo.pop()); S.sel=find(S.doc.root,S.sel)?S.sel:S.doc.root.id; touch(); } else drawMap(); $('#cv').focus(); }
@@ -279,7 +298,7 @@ function bindStage(){ const st=$('#stage'); if(!st) return; const pts=new Map();
   st.addEventListener('dblclick',e=>{ if(lastPtr!=='mouse'||MENU) return; const id=nodeAt(e); if(id) startEdit(id); });
   st.addEventListener('contextmenu',e=>{ const id=nodeAt(e); const rl=!id&&e.target.closest&&e.target.closest('g.rel'); if(rl){ e.preventDefault(); relClick(rl.dataset.rel,e.clientX,e.clientY); return; } if(!id) return; e.preventDefault(); S.sel=id; drawAll(); openNodeMenu(id,e.clientX,e.clientY); });
   st.addEventListener('wheel',e=>{ e.preventDefault(); const [x,y]=stagePoint(e); if(e.ctrlKey||e.metaKey) zoomAt(Math.exp(-e.deltaY*.01),x,y); else { S.vp={...S.vp,tx:S.vp.tx-(e.shiftKey?e.deltaY:e.deltaX),ty:S.vp.ty-(e.shiftKey?0:e.deltaY)}; applyVp(); } },{passive:false});
-  const ai=$('#aibar'); if(ai){ const q=$('#aiq'), sb=ai.querySelector('.send'); q.addEventListener('input',()=>sb.disabled=!q.value.trim()); ai.addEventListener('submit',e=>{e.preventDefault(); if(q.value.trim()) aiFromBar(q.value.trim());}); } }
+ }
 function showGhost(x,y,d){ let g=$('#ghost'); const n=lay.by.get(d.id); if(!g){g=document.createElement('div');g.id='ghost';g.className='dragghost';$('#ovl').appendChild(g);} g.textContent=(n?n.t:'')+(d.t?(d.where==='child'?' → 成為子節點':d.where==='before'?' → 放到上方':' → 放到下方'):''); g.style.left=(x+14)+'px'; g.style.top=(y+10)+'px'; }
 function hideGhost(){ $('#ghost')?.remove(); }
 // ---------- keyboard ----------
@@ -309,7 +328,7 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
   else if(k.startsWith('Arrow')){ e.preventDefault(); navigate(k); }
   else if(c&&!e.altKey&&!e.shiftKey&&/^[cxv]$/i.test(k)) clipKey(k.toLowerCase());
   else if(c&&k==='.'){ e.preventDefault(); toggleCollapse(); }
-  else if(c&&/^[1-5]$/.test(k)){ e.preventDefault(); const f=selInfo(); setField('pri',f&&f.n.pri===+k?0:+k); }
+  else if(c&&/^[1-9]$/.test(k)){ e.preventDefault(); const f=selInfo(); setField('pri',f&&f.n.pri===+k?0:+k); }
   else if(c&&k==='0'){ e.preventDefault(); setField('pri',0); }
   else if(k==='Escape'){ e.preventDefault(); if(S.preview) return endPreview(); const b=$('.tb .tbtn'); (b&&b.offsetParent?b:$('.right-actions button:not([hidden])'))?.focus(); }
   else if(k==='?'){ e.preventDefault(); openDialog({type:'shortcuts'}); }
@@ -337,6 +356,7 @@ document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.m
   if(c&&(e.key.toLowerCase()==='y'||(e.shiftKey&&e.key.toLowerCase()==='z'))){ if(S.doc){e.preventDefault();redo();} return; }
   if(c&&e.key.toLowerCase()==='o'&&S.doc){ e.preventDefault(); act('outline'); return; }
   if(c&&e.altKey&&e.key.toLowerCase()==='m'&&S.doc){ e.preventDefault(); act('note'); return; }
+  if(c&&e.altKey&&S.doc&&(e.code==='BracketRight'||e.code==='BracketLeft')){ e.preventDefault(); foldAll(e.code==='BracketRight',''); return; }
   if(c&&e.key.toLowerCase()==='j'&&S.doc){ e.preventDefault(); act('aiExpand'); return; }
   if(e.altKey&&!c&&e.key.toLowerCase()==='l'&&S.doc&&S.view==='editor'){ e.preventDefault(); act('relStart'); return; }
   if(e.altKey&&e.key.toLowerCase()==='y'&&S.doc){ e.preventDefault(); act('style'); return; }
@@ -358,13 +378,14 @@ function openMenu(html,trigger,pos){ closeMenu(); const L=$('#layer'); L.insertA
     else if(e.key==='Tab'){e.preventDefault();closeMenu(true);} }); }
 function closeMenu(restore){ if(!MENU) return false; const {el,trigger}=MENU; MENU=null; el.remove(); $('#layer .menuscrim')?.remove(); if(trigger){trigger.setAttribute('aria-expanded','false'); if(restore&&document.contains(trigger)) trigger.focus();} return true; }
 const mi=(act,icon,label,cls='',v='')=>`<button role="menuitem" tabindex="-1" data-act="${act}"${v!==''?` data-v="${esc(v)}"`:''}${cls?` class="${cls}"`:''}>${I(icon)}<span>${label}</span></button>`;
-function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],['relStart','rel','關聯線'],...(relsOf(S.doc.root).some(r=>r.a===id||r.b===id)?[['relOf','rel','編輯關聯線']]:[]),['aiExpand','spark','AI 擴充'],...((n.c||[]).length>=3?[['aiRegroup','group','AI 重新分組']]:[]),['delete','trash','刪除','del']];
-  openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c])=>mi(a,i,l,c||'')).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
+function openNodeMenu(id,x,y){ const n=find(S.doc.root,id).n; const it=[['addChild','child','子主題'],['addSibling','sibling','同級'],['edit','edit','編輯文字'],['icons','smile','圖示'],['note','note','詳情'],['outdent','parent','升一層'],['priMenu','alert','優先順序'],['quickStyle','palette','快速樣式'],['style','palette','樣式'],['copyNode','copy','複製一份'],['copyMd','outline','複製 Markdown'],['pasteMd','paste','貼上 Markdown'],['collapse','minus',n.collapsed?'展開':'收合'],...(allDeep(n).some(x=>x!==n&&x.c&&x.c.length)?[['expandAll','plus','展開全部子節點','',id],['collapseAll','minus','收合全部子節點','',id]]:[]),['relStart','rel','關聯線'],...(relsOf(S.doc.root).some(r=>r.a===id||r.b===id)?[['relOf','rel','編輯關聯線']]:[]),['aiExpand','spark','AI 擴充'],...((n.c||[]).length>=3?[['aiRegroup','group','AI 重新分組']]:[]),['delete','trash','刪除','del']];
+  openMenu(`<div class="lpmenu" role="menu" aria-label="「${esc(n.t)}」的動作"><div class="lphead" aria-hidden="true">${esc(n.t)}</div><div class="lpgrid">${it.map(([a,i,l,c,v])=>mi(a,i,l,c||'',v===undefined?'':v)).join('')}</div></div>`,null,{x:x-150,y:y+16,yAbove:y-16}); MENU.trigger=$('#cv'); }
 function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   const n=S.unsynced, syncIt=S.remote?mi('syncNow',S.driveAuth||S.sync.state==='error'?'alert':'cloud',S.driveAuth?'重新連結 Google 才能同步':S.sync.state==='saving'?'同步中…':n?`同步（${n} 項未同步）`:'已同步，再同步一次',S.driveAuth||S.sync.state==='error'?'warnit':n?'hasit':'')+'<hr>':'';
   openMenu(`<div class="ctx mmenu" role="menu" aria-label="更多">${syncIt}
   <div class="mrow" role="group" aria-label="復原與重做"><span>編輯</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="undo" aria-label="復原"${S.undo.length?'':' aria-disabled="true"'}>${I('undo')}</button><button role="menuitem" tabindex="-1" data-act="redo" aria-label="重做"${S.redo.length?'':' aria-disabled="true"'}>${I('redo')}</button></div></div>
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
+  <div class="mrow" role="group" aria-label="全部展開或收合"><span>分支</span><div class="seg wide"><button role="menuitem" tabindex="-1" data-act="expandAll">${I('plus')}全部展開</button><button role="menuitem" tabindex="-1" data-act="collapseAll">${I('minus')}全部收合</button></div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
   <hr>${mi('aiSummary','sum','AI 摘要整張圖')}${mi('aiArticle','note','文章轉心智圖（AI）')}${mi('relStart','rel','關聯線（從選取節點）')}<hr>${mi('share','share',(maps.meta(S.mapId)||{}).share?'分享中：唯讀連結…':'分享唯讀連結…',(maps.meta(S.mapId)||{}).share?'hasit':'')}${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
   <hr>${S.canInstall?mi('install','download','安裝 App 到主畫面'):''}${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
@@ -373,7 +394,7 @@ function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientR
 function openCardMenu(id,trigger){ const m=maps.meta(id), r=trigger.getBoundingClientRect();
   const html=m.trashed?`${mi('restoreMap','undo','還原','',id)}<hr>${mi('purgeMap','trash','永久刪除','del',id)}`:`${mi('openMap','ext','開啟','',id)}${mi('renameMap','edit','重新命名','',id)}${mi('dupMap','copy','建立副本','',id)}${mi('starMap','star',m.star?'移除星號':'加星號','',id)}${mi('expMapMd','download','匯出 Markdown','',id)}<hr>${mi('trashMap','trash','移到垃圾桶','del',id)}`;
   openMenu(`<div class="ctx" role="menu" aria-label="${esc(m.title)} 的動作">${html}</div>`,trigger,{x:r.right,y:r.bottom+4,alignRight:true}); }
-function openPriMenu(){ const r=$('#cv').getBoundingClientRect(); openMenu(`<div class="ctx" role="menu" aria-label="優先順序">${[1,2,3,4,5].map(n=>mi('pri','alert','優先順序 '+n,'',n)).join('')}${mi('pri','x','清除','',0)}</div>`,$('#cv'),{x:r.left+r.width/2-110,y:r.top+80}); }
+function openPriMenu(){ const r=$('#cv').getBoundingClientRect(); openMenu(`<div class="ctx" role="menu" aria-label="優先順序">${[1,2,3,4,5,6,7,8,9].map(n=>mi('pri','alert','優先順序 '+n,'',n)).join('')}${mi('pri','x','清除','',0)}</div>`,$('#cv'),{x:r.left+r.width/2-110,y:r.top+80}); }
 // ---------- dialogs ----------
 let lastFocus=null;
 function openDialog(D){ $('#toast')?.classList.remove('on'); if(!S.dialog) lastFocus=document.activeElement; S.dialog=D; drawDialog(true); }
@@ -473,7 +494,6 @@ async function runAI(){ const D=S.dialog; if(!D||D.type!=='ai'||D.busy) return; 
     if(S.dialog!==D) return; D.busy=false; D.result=res; drawDialog(); $('#layer .dlg [data-act="aiAccept"]')?.focus();
   }catch(e){ if(e.name==='AbortError'){ D.busy=false; if(S.dialog===D) drawDialog(); toast('已停止 AI'); return; } aiErr(D,e.kind||'http',e.message); } }
 function aiAccept(){ const D=S.dialog; if(!D||!D.result) return; const res=D.result; D.onClose=null; S.dialog=null; drawDialog(); const msg=res.apply(); toast(msg,res.newMap?null:['復原','undo']); }
-function aiFromBar(text){ openAI('expand',{hint:text}); runAI(); const q=$('#aiq'); if(q){q.value='';q.dispatchEvent(new Event('input'));} }
 // ---------- v1.5 relationship lines ----------
 const relById=id=>relsOf(S.doc.root).find(r=>r.id===id);
 function updRelBar(){ const cv=$('#cv'); let b=$('#relbar'); if(!S.relPick||!cv||!S.doc){ b&&b.remove(); return; } const f=find(S.doc.root,S.relPick.from); if(!f){ S.relPick=null; b&&b.remove(); return; }
@@ -710,7 +730,8 @@ async function act(a,v,el){ const f=selInfo();
   case 'priMenu': closeMenu(); openPriMenu(); break;
   case 'icons': closeMenu(); openIcons(); break;
   case 'emojiCat': if(S.dialog){ S.dialog.cat=v; drawDialog(); $(`#layer [data-act="emojiCat"][data-v="${v}"]`)?.focus(); } break;
-  case 'emojiSet': { const D=S.dialog; if(!D||D.type!=='emoji') return; closeDialog(); const id=D.nodeId; if(!find(S.doc.root,id)) return; mutate(r=>{ const x=find(r,id).n; if(v) x.icon=v; else delete x.icon; }); if(v) prefs.set({recentIcons:[v,...(prefs.get().recentIcons||[]).filter(e=>e!==v)].slice(0,16)}); break; }
+  case 'priPick': { const D=S.dialog; if(!D||D.type!=='emoji') return; closeDialog(); const id=D.nodeId; if(!find(S.doc.root,id)) return; mutate(r=>{ const x=find(r,id).n; if(+v) x.pri=+v; else delete x.pri; }); break; }
+  case 'emojiSet': { const D=S.dialog; if(!D||D.type!=='emoji') return; closeDialog(); const id=D.nodeId; if(!find(S.doc.root,id)) return; mutate(r=>{ const x=find(r,id).n; if(v) x.icon=v; else delete x.icon; }); if(v) prefs.set({recentIcons:[v,...(prefs.get().recentIcons||[]).filter(e=>e!==v)].slice(0,24)}); break; }
   case 'olToggle': S.olFocus={id:v}; toggleCollapse(v); break;
   case 'olNote': S.sel=v; S.panel='note'; render(); setTimeout(()=>$('#notearea')?.focus(),30); break;
   case 'olIndent': olOp('indent'); break; case 'olOutdent': olOp('outdent'); break; case 'olUp': olOp('up'); break; case 'olDown': olOp('down'); break; case 'olAdd': olOp('add'); break; case 'olDel': olOp('del'); break;
@@ -742,6 +763,13 @@ async function act(a,v,el){ const f=selInfo();
   case 'pri': closeMenu(); setField('pri',+v); break;
   case 'icon': setField('icon',v); break;
   case 'level': closeMenu(); setLevel(+v); break;
+  case 'quickStyle': { closeMenu(); const n=f&&f.n; if(!n) return toast('先選一個節點'); const T=th(), r=$('#cv').getBoundingClientRect();
+    openMenu(`<div class="ctx qsmenu" role="menu" aria-label="快速樣式"><div class="lphead">快速樣式：${esc(n.t)}</div>${V.qsGrid(n,V.canvasOf(S.doc,T),T.text,true)}<hr>${mi('qsCopy','copy','複製樣式')}${S.qsClip?mi('qsPaste','paste','貼上樣式'):''}</div>`,$('#cv'),{x:r.left+r.width/2-150,y:r.top+90}); break; }
+  case 'qs': { closeMenu(); if(!f) return toast('先選一個節點'); const ids=[f.n.id]; mutate(r=>{ ids.forEach(id=>{ const x=find(r,id).n; if(v) x.qs=v; else delete x.qs; delete x.hl; delete x.color; }); }); panelRefresh(); toast(v?'已套用「'+((V.QSN||{})[v]||'快速樣式')+'」':'已清除樣式'); break; }
+  case 'qsCopy': { closeMenu(); if(!f) return toast('先選一個節點'); const n=f.n; S.qsClip={qs:n.qs||'',hl:n.hl||'',color:n.color}; panelRefresh(); toast('已複製樣式：點另一個節點，再按「貼上樣式」'); break; }
+  case 'qsPaste': { closeMenu(); if(!f||!S.qsClip) return; const c=S.qsClip; mutate(r=>{ const x=find(r,f.n.id).n; for(const k of ['qs','hl','color']){ if(c[k]===''||c[k]===undefined) delete x[k]; else x[k]=c[k]; } }); panelRefresh(); toast('已貼上樣式'); break; }
+  case 'expandAll': closeMenu(); foldAll(true,v||''); break;
+  case 'collapseAll': closeMenu(); foldAll(false,v||''); break;
   case 'zoomIn': zoomAt(1.2); updMenuPct(); break; case 'zoomOut': zoomAt(1/1.2); updMenuPct(); break;
   case 'fit': closeMenu(); fit(); break;
   case 'outline': closeMenu(); if(S.outline&&S.olId&&S.doc&&find(S.doc.root,S.olId)) S.sel=S.olId; S.outline=!S.outline; if(S.outline&&S.find) closeFind(); render(); if(S.outline) setTimeout(()=>olFocus(S.sel||S.doc.root.id),30); else { ensureVisible(S.sel); $('#cv')?.focus(); } break;
@@ -789,7 +817,6 @@ async function act(a,v,el){ const f=selInfo();
   case 'relDel': relDel(); break;
   case 'relOf': relOf(); break;
   case 'aiCancel': S.dialog.ctrl&&S.dialog.ctrl.abort(); break;
-  case 'aibarClose': S.aibar=false; render(); break;
   case 'cfPick': S.dialog.pick=v; drawDialog(); $(`[data-act="cfPick"][data-v="${v}"]`)?.focus(); break;
   case 'cfApply': applyConflict(); break;
   case 'preview': preview(v); break; case 'endPreview': endPreview(); break; case 'restoreVersion': restorePreview(); break;
@@ -822,7 +849,7 @@ document.addEventListener('input',e=>{ const t=e.target; const k=t.dataset.input
   if(k==='q'){ S.q=t.value; const pos=t.selectionStart; render(); const n=$('#homeq'); if(n){n.focus();n.setSelectionRange(pos,pos);} }
   else if(k==='sideQ'){ S.sideQ=t.value; const pos=t.selectionStart; const inDrawer=!!t.closest('.navdrawer'); const host=inDrawer?$('.navdrawer .side'):$('#side'); host.innerHTML=V.sidebar(S,maps.index()); const n=host.querySelector('#sideq'); n.focus(); n.setSelectionRange(pos,pos); }
   else if(t.classList.contains('olin')){ const id=t.dataset.olid, x=S.doc&&find(S.doc.root,id); if(!x||S.preview) return; if(t._snapFor!==id){ S.undo.push(JSON.stringify(S.doc.root)); if(S.undo.length>100) S.undo.shift(); S.redo=[]; t._snapFor=id; } x.n.t=t.value; clearTimeout(olT); olT=setTimeout(quietSave,400); }
-  else if(k==='emojiQ'&&S.dialog){ S.dialog.q=t.value; const g=$('#emgrid'); if(g) g.innerHTML=V.emojiGrid(V.emojiList(S.dialog),(find(S.doc.root,S.dialog.nodeId)||{n:{}}).n.icon); $('#layer .emcats')?.toggleAttribute('hidden',!!t.value.trim()); $('#layer .emrow')?.toggleAttribute('hidden',!!t.value.trim()); }
+  else if(k==='emojiQ'&&S.dialog){ S.dialog.q=t.value; const g=$('#emgrid'); if(g) g.innerHTML=V.emojiGrid(V.emojiList(S.dialog),(find(S.doc.root,S.dialog.nodeId)||{n:{}}).n.icon,S.dialog.pri); $('#layer .emcats')?.toggleAttribute('hidden',!!t.value.trim()); $('#layer .emrow')?.toggleAttribute('hidden',!!t.value.trim()); }
   else if(k==='find'&&S.find){ S.find.q=t.value; S.find.i=0; goFind(0); }
   else if(k==='mdText'&&S.dialog&&S.dialog.type==='md'){ S.dialog.md=t.value; updateMdPreview(); }
   else if(k==='note'){ clearTimeout(t._t); t._t=setTimeout(()=>{ const f=selInfo(); if(!f) return; const v=t.value; mutate(r=>{const x=find(r,f.n.id).n; if(v.trim()) x.note=v; else delete x.note;}); },400); } });

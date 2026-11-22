@@ -1,5 +1,5 @@
 // Layout + SVG rendering for the right-expanding logic chart (DESIGN §7). Pure functions: data in, SVG string out.
-import { readable, cr, lum, mix, tint, esc, PRI, P } from './core.js';
+import { readable, cr, lum, mix, tint, esc, PRI, P, isMark, markInner, qsLook } from './core.js';
 import { clLayout, clNodeSvg, clEdges, clExpander } from './classic.js';
 const mctx=document.createElement('canvas').getContext('2d');
 export const FF='"Noto Sans TC","Noto Sans CJK TC","PingFang TC","Microsoft JhengHei",sans-serif';
@@ -134,20 +134,23 @@ export function renderMap(root,th,opt={}){
       else {fill=nodeBg;stroke=col;sw=2;}
       bgc=fill;
     } else if(th.deep==='plain'){fill='none';bgc=CV;} else if(root.boxed&&th.deepBox){fill=tint(col0,.07,'#FFFFFF');stroke=mix('#FFFFFF',col,.75);sw=1.1;rx=7;bgc=fill;} else if(root.boxed){fill=nodeBg;stroke=th.dark?'#353A45':mix('#FFFFFF',col,.45);sw=1.2;bgc=fill;}
-    if(!(d>=2&&th.deep==='plain')&&!(fill==='none'&&stroke==='none')){ // every visible node shape gets a >=3:1 edge (WCAG 1.4.11)
+    const QL=n.qs?qsLook(n.qs,CV,th.text):null; // v1.8.2 quick style overrides the theme's look for this node
+    if(QL){ fill=QL.fill; stroke=QL.stroke; sw=QL.sw; fw=QL.fw; txt=QL.text; bgc=fill==='none'?CV:fill; if(QL.pill) rx=n.h/2; }
+    if(!(d>=2&&th.deep==='plain'&&!QL)&&!(fill==='none'&&stroke==='none')){ // every visible node shape gets a >=3:1 edge (WCAG 1.4.11)
       const fb=fill==='none'?1:cr(fill,CV), sb=(stroke==='none'||!sw)?1:cr(stroke,CV);
       if(Math.max(fb,sb)<3){stroke=d===0?(lineC?G(lineC):G(th.root)):G(col);sw=Math.max(sw,1.5);}}
     txt=readable(txt,bgc,4.5);
     if(d===0&&!th.flatRoot) g+=`<rect x="${x}" y="${y+4}" width="${n.w}" height="${n.h}" rx="${rx}" fill="${th.root}" opacity=".22" filter="url(#blur)"/>`;
-    g+=`<rect class="hit"${fill==='none'&&stroke==='none'?'':` data-g="node" data-gbg="${CV}"`} x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${rx}" fill="${fill==='none'?'transparent':fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
-    if(d>=2&&!root.boxed&&th.deep!=='plain'&&edge!=='bracket') g+=`<line data-g="edge" data-gbg="${CV}" x1="${x}" y1="${y+n.h}" x2="${x+n.w}" y2="${y+n.h}" stroke="${G(col)}" stroke-width="${Math.max(2,minW)}" stroke-linecap="round"/>`;
+    g+=`<rect class="hit"${fill==='none'&&stroke==='none'?'':` data-g="node" data-gbg="${CV}"`} x="${x}" y="${y}" width="${n.w}" height="${n.h}" rx="${rx}" fill="${fill==='none'?'transparent':fill}" stroke="${stroke}" stroke-width="${sw}"${QL&&QL.dash?` stroke-dasharray="${QL.dash}"`:''}/>`;
+    if(QL&&QL.under) g+=`<line data-g="edge" data-gbg="${CV}" x1="${x}" y1="${y+n.h}" x2="${x+n.w}" y2="${y+n.h}" stroke="${QL.under}" stroke-width="3" stroke-linecap="round"/>`;
+    if(!QL&&d>=2&&!root.boxed&&th.deep!=='plain'&&edge!=='bracket') g+=`<line data-g="edge" data-gbg="${CV}" x1="${x}" y1="${y+n.h}" x2="${x+n.w}" y2="${y+n.h}" stroke="${G(col)}" stroke-width="${Math.max(2,minW)}" stroke-linecap="round"/>`;
     if(opt.lod&&d>=2){g+=`<rect x="${x+n.padX}" y="${n.y-4}" width="${Math.max(10,(n.w-2*n.padX)*.8)}" height="8" rx="4" data-g="lod" data-gbg="${bgc}" fill="${G(mix(bgc,col,.45),bgc)}"/>`; body+=`<g class="node" data-id="${n.id}">${g}</g>`; return;}
     const F=fontOf(d,th); let cx=x+n.padX; const fs=fsOf(d), ry=n.y+(n.ih||0)/2, ty=ry+fs*.36;
     if(n.ib){ const iw=n.ib.w, ih=n.ib.h, ix=n.x-iw/2, iy=y+(d===0?8:6); const cid='ic'+String(n.id).replace(/[^\w-]/g,''); defs+=`<clipPath id="${cid}"><rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6"/></clipPath>`;
       g+=`<rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6" fill="${th.dark?'#2A2E36':'#F2F3F5'}"/><image href="${esc(n.img.src)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${cid})"><title>${esc(n.img.alt||'圖片')}</title></image><rect x="${ix}" y="${iy}" width="${iw}" height="${ih}" rx="6" fill="none" stroke="${th.dark?'#4A505C':'#D5D9DF'}" stroke-width="1"/>`; }
     if(n.pri){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${ry}" r="9" fill="${PRI[n.pri]}"/><text x="${cx+9}" y="${ry+4}" font-size="11.5" font-weight="700" fill="#FFFFFF" data-bg="${PRI[n.pri]}" text-anchor="middle">${n.pri}</text>`; cx+=24;}
     if(n.done){g+=`<circle data-g="badge" data-gbg="${bgc}" cx="${cx+9}" cy="${ry}" r="9" fill="#0E7A56"/><path data-g="icon" data-gbg="#0E7A56" d="M${cx+5},${ry} l3,3 l5,-6" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-linecap="round"/>`; cx+=24;}
-    if(n.icon){g+=`<text x="${cx}" y="${ty}" font-size="${fs}" aria-hidden="true">${esc(n.icon)}</text>`; cx+=fs*1.15+6;}
+    if(n.icon){g+=isMark(n.icon)?`<g data-g="icon" transform="translate(${cx} ${ry-fs*.56}) scale(${fs*1.12/24})" aria-hidden="true">${markInner(n.icon)}</g>`:`<text x="${cx}" y="${ty}" font-size="${fs}" aria-hidden="true">${esc(n.icon)}</text>`; cx+=fs*1.15+6;}
     const TW=n.lines?Math.max(...n.lines.map(l=>tw(l,F))):tw(n.t||' ',F);
     if(n.hl&&th.hl!==undefined){const hl=typeof n.hl==='string'?n.hl:(th.hl||'#FFE27A'); g+=`<rect x="${cx-4}" y="${ry-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable(th.text,hl,4.5); bgc=hl;}
     else if(n.hl){const hl=typeof n.hl==='string'?n.hl:'#FFE27A'; g+=`<rect x="${cx-4}" y="${ry-fs*.72-n.lh/2}" width="${TW+8}" height="${fs*1.44+n.lh}" rx="4" fill="${hl}" data-g="hl" data-gbg="${bgc}" stroke="${readable(mix(hl,'#000000',.2),bgc,3)}" stroke-width="1"/>`; txt=readable('#1F2329',hl,4.5); bgc=hl;}
