@@ -10,7 +10,7 @@ sv=$(sed -nE "s/^const VERSION='([^']+)'.*/\1/p" sw.js); av=$(sed -nE "s/^export
 [ -n "$sv" ] && [ "$sv" = "$av" ] || { echo "✗ sw.js VERSION ($sv) 和 js/version.js ($av) 不一致"; exit 1; }
 miss=0; for f in js/*.js css/*.css; do grep -q "'$f'" sw.js || { echo "✗ sw.js 的 SHELL 少了 $f"; miss=1; }; done; [ $miss = 0 ] || exit 1
 if [ "${1:-}" = "--staged" ] && git rev-parse --git-dir >/dev/null 2>&1; then
-  shell=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E '^(index\.html|manifest\.webmanifest|css/|js/|icons/)' || true)
+  shell=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E '^(index\.html|view\.html|manifest\.webmanifest|css/|js/|icons/)' || true)
   if [ -n "$shell" ] && ! git diff --cached -U0 -- sw.js | grep -qE "^\+const VERSION="; then
     echo "✗ 修改了 App 檔案但沒有更新版本：請同時改 sw.js 和 js/version.js 的 VERSION"; echo "$shell" | sed 's/^/   /'; exit 1; fi
 fi

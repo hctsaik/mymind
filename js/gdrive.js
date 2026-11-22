@@ -62,5 +62,24 @@ export function driveClient(){
     async writeIndex(list){ const text=JSON.stringify({format:'mymind-index/1',updated:new Date().toISOString(),maps:list},null,1)+'\n'; if(!byName.size) await listAll(); await upload(byName.get(INDEX),INDEX,text); },
     async commits(path){ let f=byName.get(nameOf(path)); if(!f){ await listAll(); f=byName.get(nameOf(path)); } if(!f) return [];
       const j=await req('GET',`${API}/files/${f.id}/revisions?fields=revisions(id,modifiedTime,lastModifyingUser(displayName))&pageSize=100`);
-      return (j.revisions||[]).map((r,i)=>({sha:`rev:${f.id}:${r.id}`,msg:`第 ${i+1} 版 · Google 雲端硬碟`,date:r.modifiedTime,author:r.lastModifyingUser&&r.lastModifyingUser.displayName||''})).reverse(); } };
+      return (j.revisions||[]).map((r,i)=>({sha:`rev:${f.id}:${r.id}`,msg:`第 ${i+1} 版 · Google 雲端硬碟`,date:r.modifiedTime,author:r.lastModifyingUser&&r.lastModifyingUser.displayName||''})).reverse(); },
+    // ----- read-only share links (v1.8, see share.js) -----
+    // One Google Sheet per shared map, in the MyMind folder, tagged with appProperties (visible only to MyMind):
+    // mmShare = map id, mmKey = the link's decryption key (so the same link can be shown again on another device).
+    // The Sheet holds only ciphertext; "anyone with the link" may read it, which is what lets view.html fetch it signed out.
+    async findShare(mapId){ const j=await req('GET',`${API}/files?q=${q(`appProperties has { key='mmShare' and value='${String(mapId).replace(/[^A-Za-z0-9_-]/g,'')}' } and trashed=false`)}&fields=files(id,modifiedTime,appProperties)&spaces=drive&pageSize=10`);
+      const f=(j.files||[]).find(x=>x.appProperties&&x.appProperties.mmKey); return f?{fid:f.id,key:f.appProperties.mmKey,at:f.appProperties.mmAt||f.modifiedTime}:null; },
+    async createShare(mapId,title,csv,key,at){ const b='mm'+Math.random().toString(36).slice(2);
+      const meta={name:`MyMind 分享 · ${String(title||'').slice(0,60)}`,mimeType:'application/vnd.google-apps.spreadsheet',parents:[await ensureFolder()],
+        description:'MyMind 唯讀分享連結的加密內容。在 MyMind 按「停止分享」或刪除這個檔案，連結就會失效。',appProperties:{mmShare:String(mapId),mmKey:key,mmAt:at}};
+      const body=`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: text/csv; charset=UTF-8\r\n\r\n${csv}\r\n--${b}--`;
+      const f=await req('POST',`${UP}/files?uploadType=multipart&fields=id`,{headers:{'Content-Type':'multipart/related; boundary='+b},body});
+      try{ await req('POST',`${API}/files/${f.id}/permissions?fields=id`,{headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'anyone',role:'reader',allowFileDiscovery:false})}); }
+      catch(e){ await req('DELETE',`${API}/files/${f.id}`).catch(()=>{}); throw new DriveError(e.status,e.status===403?'你的 Google 帳號不允許「知道連結的人都能查看」（可能是公司或學校帳號的限制）':e.message); }
+      return {fid:f.id,key,at}; },
+    // rewrites the same Sheet, so the link stays the same
+    async updateShare(fid,csv,at){ await req('PATCH',`${UP}/files/${fid}?uploadType=media&fields=id`,{headers:{'Content-Type':'text/csv; charset=UTF-8'},body:csv});
+      await req('PATCH',`${API}/files/${fid}?fields=id`,{headers:{'Content-Type':'application/json'},body:JSON.stringify({appProperties:{mmAt:at}})}); },
+    // deleting the Sheet is what stops the link working (already gone counts as stopped)
+    async deleteShare(fid){ try{ await req('DELETE',`${API}/files/${fid}`); }catch(e){ if(e.status!==404) throw e; } } };
 }

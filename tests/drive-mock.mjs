@@ -8,9 +8,10 @@ export const GIS_STUB=`window.google={accounts:{oauth2:{
 export function mockDrive({email='hanzhang.test@gmail.com',name='漢章'}={}){
   const files=new Map(); let n=0; const requests=[]; const dead=new Set(), seen=new Set(); let failNext=null;
   const now=()=>new Date(Date.now()+n).toISOString();
-  const mk=(o)=>{ const id='f'+(++n)+Math.random().toString(36).slice(2,6); const f={id,version:1,modifiedTime:now(),trashed:false,parents:[],revs:[],...o}; if(f.text!=null) f.revs.push({id:'r1',text:f.text,modifiedTime:f.modifiedTime}); files.set(id,f); return f; };
+  const mk=(o)=>{ const id=('1f'+(++n)+'x'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2)).slice(0,33); /* Drive ids are ~33-44 url-safe chars */ const f={id,version:1,modifiedTime:now(),trashed:false,parents:[],revs:[],...o}; if(f.text!=null) f.revs.push({id:'r1',text:f.text,modifiedTime:f.modifiedTime}); files.set(id,f); return f; };
   const bump=(f,text)=>{ f.version++; f.modifiedTime=now(); if(text!=null){ f.text=text; f.revs.push({id:'r'+f.version,text,modifiedTime:f.modifiedTime}); } };
-  const meta=f=>({id:f.id,name:f.name,version:String(f.version),modifiedTime:f.modifiedTime,mimeType:f.mimeType});
+  const meta=f=>({id:f.id,name:f.name,version:String(f.version),modifiedTime:f.modifiedTime,mimeType:f.mimeType,...(f.appProperties?{appProperties:f.appProperties}:{})});
+  const SHEET='application/vnd.google-apps.spreadsheet', sheetOk=t=>String(t).split(/\r?\n/).every(l=>l.length<=50000); // Sheets: 50,000 characters per cell
   const parseMultipart=(body,ct)=>{ const b=ct.match(/boundary=(.+)$/)[1]; const parts=body.split('--'+b).slice(1,-1).map(p=>p.replace(/^\r\n/,'').replace(/\r\n$/,'')); const [h1,...m1]=parts[0].split('\r\n\r\n'); const [h2,...c2]=parts[1].split('\r\n\r\n'); return {meta:JSON.parse(m1.join('\r\n\r\n')),text:c2.join('\r\n\r\n')}; };
   const handler=async route=>{ await new Promise(r=>setTimeout(r,+(process.env.DRIVE_LATENCY??60))); const req=route.request(); const u=new URL(req.url()); const m=req.method(); const p=u.pathname;
     const H={'access-control-allow-origin':'*'}; const json=(s,o)=>route.fulfill({status:s,contentType:'application/json',headers:H,body:JSON.stringify(o)});
@@ -23,19 +24,28 @@ export function mockDrive({email='hanzhang.test@gmail.com',name='漢章'}={}){
     if(p==='/drive/v3/files'&&m==='GET'){ const q=u.searchParams.get('q')||''; let list=[...files.values()].filter(f=>!f.trashed);
       if(mm=q.match(/name='([^']+)' and mimeType='application\/vnd.google-apps.folder'/)) list=list.filter(f=>f.name===mm[1]&&f.mimeType==='application/vnd.google-apps.folder');
       else if(mm=q.match(/'([^']+)' in parents/)) list=list.filter(f=>f.parents.includes(mm[1]));
+      else if(mm=q.match(/appProperties has \{ key='([^']+)' and value='([^']*)' \}/)) list=list.filter(f=>f.appProperties&&f.appProperties[mm[1]]===mm[2]);
       return json(200,{files:list.map(meta)}); }
     if(p==='/drive/v3/files'&&m==='POST'){ const b=JSON.parse(req.postData()||'{}'); const f=mk({name:b.name,mimeType:b.mimeType,parents:b.parents||[]}); return json(200,meta(f)); }
-    if(p==='/upload/drive/v3/files'&&m==='POST'){ const {meta:md,text}=parseMultipart(req.postData(),req.headers()['content-type']); const f=mk({name:md.name,mimeType:md.mimeType,parents:md.parents||[],text}); return json(200,meta(f)); }
-    if((mm=p.match(/^\/upload\/drive\/v3\/files\/([^/]+)$/))&&m==='PATCH'){ const f=files.get(mm[1]); if(!f) return json(404,{error:{message:'File not found'}}); const {text}=parseMultipart(req.postData(),req.headers()['content-type']); bump(f,text); return json(200,meta(f)); }
+    if(p==='/upload/drive/v3/files'&&m==='POST'){ const {meta:md,text}=parseMultipart(req.postData(),req.headers()['content-type']); if(md.mimeType===SHEET&&!sheetOk(text)) return json(400,{error:{message:'cell too long'}}); const f=mk({name:md.name,mimeType:md.mimeType,parents:md.parents||[],text,appProperties:md.appProperties,description:md.description,perms:[]}); return json(200,meta(f)); }
+    if((mm=p.match(/^\/upload\/drive\/v3\/files\/([^/]+)$/))&&m==='PATCH'){ const f=files.get(mm[1]); if(!f) return json(404,{error:{message:'File not found'}}); const ct=req.headers()['content-type']||''; const text=/multipart/.test(ct)?parseMultipart(req.postData(),ct).text:req.postData(); if(f.mimeType===SHEET&&!sheetOk(text)) return json(400,{error:{message:'cell too long'}}); bump(f,text); return json(200,meta(f)); }
     if((mm=p.match(/^\/drive\/v3\/files\/([^/]+)\/revisions\/([^/]+)$/))){ const f=files.get(mm[1]); const r=f&&f.revs.find(r=>r.id===mm[2]); return r?route.fulfill({status:200,contentType:'application/json',headers:H,body:r.text}):json(404,{error:{message:'nope'}}); }
     if((mm=p.match(/^\/drive\/v3\/files\/([^/]+)\/revisions$/))){ const f=files.get(mm[1]); return json(200,{revisions:(f?f.revs:[]).map(r=>({id:r.id,modifiedTime:r.modifiedTime,lastModifyingUser:{displayName:name}}))}); }
+    if((mm=p.match(/^\/drive\/v3\/files\/([^/]+)\/permissions$/))&&m==='POST'){ const f=files.get(mm[1]); if(!f) return json(404,{error:{message:'File not found'}}); const b=JSON.parse(req.postData()||'{}'); (f.perms=f.perms||[]).push(b); return json(200,{id:'p'+f.perms.length}); }
     if((mm=p.match(/^\/drive\/v3\/files\/([^/]+)$/))){ const f=files.get(mm[1]); if(!f) return json(404,{error:{message:'File not found'}});
+      if(m==='DELETE'){ files.delete(f.id); return route.fulfill({status:204,headers:H,body:''}); }
       if(m==='GET'&&u.searchParams.get('alt')==='media') return route.fulfill({status:200,contentType:'application/json',headers:H,body:f.text});
-      if(m==='PATCH'){ const b=JSON.parse(req.postData()||'{}'); if(b.trashed) f.trashed=true; bump(f); return json(200,meta(f)); } }
+      if(m==='PATCH'){ const b=JSON.parse(req.postData()||'{}'); if(b.trashed) f.trashed=true; if(b.appProperties) f.appProperties={...(f.appProperties||{}),...b.appProperties}; bump(f); return json(200,meta(f)); } }
     return json(404,{error:{message:'unhandled '+m+' '+p}}); };
+  // anonymous Sheets CSV export (docs.google.com), as a signed-out browser sees it: only "anyone with the link" Sheets, CORS *
+  const sheetHandler=async route=>{ const req=route.request(), u=new URL(req.url()); requests.push('SHEET '+u.pathname); const mm=u.pathname.match(/^\/spreadsheets\/d\/([^/]+)\/(export|gviz\/tq)$/);
+    const f=mm&&files.get(mm[1]); const pub=f&&f.mimeType===SHEET&&(f.perms||[]).some(p=>p.type==='anyone');
+    if(req.headers()['cookie']) return route.fulfill({status:500,body:'cookies sent'});
+    if(!pub) return route.fulfill({status:404,headers:{'access-control-allow-origin':'*'},contentType:'text/html',body:'<html>Sorry, unable to open the file at this time.</html>'});
+    return route.fulfill({status:200,headers:{'access-control-allow-origin':'*'},contentType:'text/csv; charset=utf-8',body:f.text}); };
   const folder=()=>[...files.values()].find(f=>f.name==='MyMind'&&f.mimeType==='application/vnd.google-apps.folder'&&!f.trashed);
   const inFolder=()=>{ const fo=folder(); return fo?[...files.values()].filter(f=>f.parents.includes(fo.id)&&!f.trashed):[]; };
-  return { files, requests, handler, folder, inFolder,
+  return { files, requests, handler, sheetHandler, folder, inFolder, shares:()=>[...files.values()].filter(f=>f.mimeType===SHEET),
     mapFile:id=>inFolder().find(f=>f.name===id+'.mymind'),
     doc:id=>{ const f=inFolder().find(f=>f.name===id+'.mymind'); return f?JSON.parse(f.text):null; },
     index:()=>{ const f=inFolder().find(f=>f.name==='index.json'); return f?JSON.parse(f.text):null; },

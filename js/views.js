@@ -57,6 +57,7 @@ export function topbar(S,doc,curNode){
    <div class="tb" role="toolbar" aria-label="編輯工具">${tb.map(b=>typeof b==='string'?`<span class="sep ${b.slice(1)}"></span>`:`<button class="tbtn ${b[2]}" data-act="${b[4]}" aria-label="${b[1]}${b[3]?'（'+b[3]+'）':''}" title="${b[1]}${b[3]?'  '+b[3]:''}"${b[4]==='outline'?` aria-pressed="${!!S.outline}"`:b[4]==='history'?` aria-pressed="${S.panel==='history'}"`:''}>${I(b[0])}<span>${b[1]}</span></button>`).join('')}</div>
    <div class="right-actions">
      ${syncBtn(S,'top')}
+     <button class="btn ghost desk-only shbtn${S.shared?' on':''}" data-act="share" aria-haspopup="dialog" aria-label="${S.shared?'分享中：唯讀連結':'分享唯讀連結'}">${I('share')}<span class="lbl">${S.shared?'分享中':'分享'}</span></button>
      <button class="btn ghost exp desk-only" data-act="exportMenu" aria-haspopup="menu" aria-expanded="false" aria-label="匯出">${I('download')}<span class="lbl">匯出</span></button>
      <button class="btn desk-only ${S.panel==='style'?'style-on':''}" data-act="style" aria-pressed="${S.panel==='style'}">${I('palette')}樣式</button>
      <button class="icon-btn mobile-only rb ai" data-act="ai" aria-label="AI">${I('spark')}</button>
@@ -350,3 +351,35 @@ export function emojiDialog(D,cur,recent){ return `<div class="scrim" data-act="
    <div class="emcats" role="tablist" aria-label="分類"${D.q?' hidden':''}>${EMOJI.map(([k,l])=>`<button role="tab" data-act="emojiCat" data-v="${k}" aria-selected="${(D.cat||'mark')===k}" tabindex="${(D.cat||'mark')===k?0:-1}">${l}</button>`).join('')}</div>
    <div class="emgrid" id="emgrid" role="grid" aria-label="${D.q?'搜尋結果':'圖示'}">${emojiGrid(emojiList(D),cur)}</div></div>
   <div class="mfoot"><button class="btn" data-act="emojiSet" data-v=""${cur?'':' disabled'}>${I('x')}移除圖示</button><span class="emtip desk-only">方向鍵選擇 · Enter 套用</span><button class="btn" style="margin-left:auto" data-act="closeDialog">取消</button></div></div></div>`; }
+
+// ---------- read-only share link (v1.8) ----------
+const fmtAt=iso=>{ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+export function shareDialog(D){ const st=D.st, B=D.busy, dis=B?' disabled aria-disabled="true"':'';
+  const lab=(k,idle,busy)=>B===k?`<span class="spin sm" aria-hidden="true"></span>${busy}`:idle;
+  const linkBox=(url,id)=>`<div class="field shlink"><label for="${id}">連結</label><div class="inp"><input id="${id}" readonly value="${esc(url)}" data-act="shareSelect" spellcheck="false"><button class="btn" data-act="shareCopy" data-v="${id}"${dis}>${I('copy')}複製</button></div></div>`;
+  let body='', foot='';
+  if(st){ const url=D.url||'';
+    body=`<div class="shstate on" role="status">${I('eye')}<div><b>分享中：知道連結的人都能查看</b><span>不需要帳號，只能看、不能改；可以拖曳、縮放、展開或收合分支。</span></div></div>
+     ${linkBox(url,'sh-url')}
+     <div class="shsnap ${D.stale?'stale':''}">${I(D.stale?'alert':'clock')}<div><b>快照 · ${esc(fmtAt(st.at))}</b><span>${D.stale?'之後你又改過這張圖，對方看到的還是舊版本。':'連結顯示的是這個時間的樣子；之後的修改要按「更新連結內容」，連結不變。'}</span></div>
+      <button class="btn ${D.stale?'primary':''}" data-act="shareUpdate"${dis}>${lab('update',I('cloud')+'更新連結內容','更新中…')}</button></div>
+     ${D.confirmStop?`<div class="shstop" role="alert"><b>停止分享？</b><span>連結會立刻失效：已經打開的人重新整理後也看不到。雲端硬碟裡的分享檔會被刪除（你的心智圖不受影響）。</span><div class="row"><button class="btn" data-act="shareStopNo"${dis}>取消</button><button class="btn danger" data-act="shareStop" data-v="yes"${dis}>${lab('stop','停止分享','停止中…')}</button></div></div>`:''}
+     ${D.err?`<p class="err" role="alert">${I('alert')}${esc(D.err)}</p>`:''}`;
+    foot=`${D.confirmStop?'':`<button class="btn ghost dangertext" data-act="shareStop"${dis}>${I('trash')}停止分享</button>`}<span class="grow"></span>${D.canSend?`<button class="btn" data-act="shareSend"${dis}>${I('share')}傳送…</button>`:''}<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">${I('ext')}預覽</a><button class="btn primary" data-act="shareCopy" data-v="sh-url"${dis}>${I('copy')}複製連結</button>`;
+  } else if(D.inline){
+    body=`<div class="shstate on" role="status">${I('eye')}<div><b>內嵌連結：知道連結的人都能查看</b><span>整張圖（快照 · ${esc(fmtAt(D.inlineAt))}）就在網址裡，不經過任何雲端。</span></div></div>
+     ${linkBox(D.inline,'sh-url')}
+     <div class="warnbox" role="note">${I('alert')}<div><b>這種連結無法停止分享</b>，也無法更新。要能隨時停止，請改用「建立連結」（存在你的 Google 雲端硬碟）。</div></div>`;
+    foot=`<button class="btn ghost" data-act="shareInlineBack">返回</button><span class="grow"></span>${D.canSend?`<button class="btn" data-act="shareSend">${I('share')}傳送…</button>`:''}<button class="btn primary" data-act="shareCopy" data-v="sh-url">${I('copy')}複製連結</button>`;
+  } else {
+    body=`<ul class="shfacts">
+      <li>${I('eye')}<div><b>知道連結的人都能查看</b><span>對方用任何瀏覽器打開，不需要帳號；只能看、不能改。可以拖曳、縮放、展開或收合分支。</span></div></li>
+      <li>${I('clock')}<div><b>快照</b><span>連結顯示按下時的樣子（含主題、圖片、貼圖與收合狀態）。之後修改，回來按「更新連結內容」，連結不變。</span></div></li>
+      <li>${I('lock')}<div><b>可以隨時停止</b><span>加密後存成你 Google 雲端硬碟「MyMind」資料夾裡的一個檔案；按「停止分享」就刪除，連結立即失效。</span></div></li></ul>
+     ${D.google?'':`<p class="shnote">${I('info')}會先跳出 Google 視窗：選你的帳號、按「繼續」。</p>`}
+     ${D.err?`<p class="err" role="alert">${I('alert')}${esc(D.err)}</p>`:''}
+     ${D.inlineOk?`<button class="linkish" data-act="shareInline"${dis}>${lab('inline','不用 Google：改產生內嵌連結（無法停止分享）','產生中…')}</button>`:''}`;
+    foot=`<button class="btn" data-act="closeDialog">取消</button><button class="btn primary" style="margin-left:auto" data-act="shareCreate"${dis}>${lab('create',I('link')+(D.google?'建立分享連結':'連結 Google 並建立'),D.checking?'確認中…':'建立中…')}</button>`;
+  }
+  return `<div class="scrim" data-act="scrim"><div class="modal shmodal" role="dialog" aria-modal="true" aria-labelledby="sh-h" aria-describedby="sh-d"><div class="mhead"><div><h3 id="sh-h">${I('share')}分享唯讀連結</h3><p id="sh-d">${esc(D.icon||'🧠')} ${esc(D.title)}</p></div><button class="icon-btn close" data-act="closeDialog" aria-label="關閉">${I('x')}</button></div>
+   <div class="mbody">${body}</div><div class="mfoot">${foot}</div></div></div>`; }

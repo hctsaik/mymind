@@ -8,6 +8,7 @@ import { merge3, diffSummary } from './merge.js';
 import * as AI from './ai.js';
 import * as IO from './io.js';
 import * as V from './views.js';
+import * as SH from './share.js';
 import { VERSION } from './version.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const P0=prefs.get();
@@ -80,7 +81,7 @@ function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main')
     else drawAll(); }
   drawDialog(); }
 const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
-function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S); const mb=$('.top .rb.more'); if(mb&&!mb.matches('[aria-expanded=true]')) mb.outerHTML=V.moreBtn(S); $$('.mstat').forEach(x=>x.remove()); $('.top.flt')?.insertAdjacentHTML('afterend',V.mobileStatus(S));
+function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S); const sb=$('.top .shbtn'); if(sb){ sb.classList.toggle('on',S.shared); sb.querySelector('.lbl').textContent=S.shared?'分享中':'分享'; sb.setAttribute('aria-label',S.shared?'分享中：唯讀連結':'分享唯讀連結'); } const mb=$('.top .rb.more'); if(mb&&!mb.matches('[aria-expanded=true]')) mb.outerHTML=V.moreBtn(S); $$('.mstat').forEach(x=>x.remove()); $('.top.flt')?.insertAdjacentHTML('afterend',V.mobileStatus(S));
   const bp=$('.backpill'); if(bp){bp.querySelector('.cn').textContent=curName(); bp.setAttribute('aria-label','回到列表（目前節點：'+curName()+'）');}
   $('#cv').style.setProperty('--cv',th().canvas); $('#cv').style.setProperty('--cvdot',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas); { const cv=$('#cv'), bi=cvBgImg(); if(cv.dataset.bgi!==bi){ cv.dataset.bgi=bi; cv.style.backgroundImage=bi; cv.style.backgroundSize=bi?'100% 100%':''; cv.style.backgroundPosition=bi?'left bottom':''; cv.style.backgroundRepeat=bi?'no-repeat':''; } }
   const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
@@ -365,7 +366,7 @@ function openMoreMenu(trigger){ const r=trigger.getBoundingClientRect();
   <div class="mrow" role="group" aria-label="復原與重做"><span>編輯</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="undo" aria-label="復原"${S.undo.length?'':' aria-disabled="true"'}>${I('undo')}</button><button role="menuitem" tabindex="-1" data-act="redo" aria-label="重做"${S.redo.length?'':' aria-disabled="true"'}>${I('redo')}</button></div></div>
   <div class="mrow" role="group" aria-label="顯示層級"><span>層級</span><div class="seg">${[1,2,3,0].map(l=>`<button role="menuitem" tabindex="-1" data-act="level" data-v="${l}">${l||'全部'}</button>`).join('')}</div></div>
   <div class="mrow" role="group" aria-label="縮放"><span>縮放</span><div class="seg"><button role="menuitem" tabindex="-1" data-act="zoomOut" aria-label="縮小">${I('minus')}</button><span class="pctb" aria-live="polite">${Math.round(S.vp.sc*100)}%</span><button role="menuitem" tabindex="-1" data-act="zoomIn" aria-label="放大">${I('plus')}</button><button role="menuitem" tabindex="-1" data-act="fit" aria-label="符合畫面">${I('fit')}</button></div></div>
-  <hr>${mi('aiSummary','sum','AI 摘要整張圖')}${mi('aiArticle','note','文章轉心智圖（AI）')}${mi('relStart','rel','關聯線（從選取節點）')}<hr>${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
+  <hr>${mi('aiSummary','sum','AI 摘要整張圖')}${mi('aiArticle','note','文章轉心智圖（AI）')}${mi('relStart','rel','關聯線（從選取節點）')}<hr>${mi('share','share',(maps.meta(S.mapId)||{}).share?'分享中：唯讀連結…':'分享唯讀連結…',(maps.meta(S.mapId)||{}).share?'hasit':'')}${mi('history','history','版本歷史')}${mi('exportMenu','download','匯出 PNG／SVG／Markdown')}${mi('copyMd','outline','複製選取節點為 Markdown')}${mi('mdImport','paste','從 Markdown 匯入／貼上')}${mi('import','upload','匯入檔案（Markdown／OPML）')}
   <hr>${S.canInstall?mi('install','download','安裝 App 到主畫面'):''}${mi('backup','download','匯出全部備份（.mymind）')}${mi('settingsA11y','palette','外觀與無障礙')}${mi('settings','gear','設定：儲存、同步與金鑰')}${mi('shortcuts','kb','手勢與快捷鍵')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
 function openExportMenu(trigger){ const r=(trigger||$('#cv')).getBoundingClientRect();
   openMenu(`<div class="ctx" role="menu" aria-label="匯出">${mi('exp','image','PNG 圖片（2x）','', 'png')}${mi('exp','image','SVG 向量圖','','svg')}${mi('exp','note','PDF（A4，符合頁面）','','pdf')}${mi('copyMd','copy','複製節點為 Markdown')}${mi('exp','outline','整張圖 Markdown（.md）','','md')}${mi('exp','outline','OPML','','opml')}${mi('exp','download','.mymind.json','','json')}<hr>${mi('mdImport','paste','貼上／匯入 Markdown…')}</div>`,trigger,{x:r.right,y:r.bottom+6,alignRight:true}); }
@@ -378,7 +379,7 @@ let lastFocus=null;
 function openDialog(D){ $('#toast')?.classList.remove('on'); if(!S.dialog) lastFocus=document.activeElement; S.dialog=D; drawDialog(true); }
 function closeDialog(){ if(!S.dialog) return; if(S.dialog.type==='ai'&&S.dialog.ctrl) S.dialog.ctrl.abort(); const D=S.dialog; S.dialog=null; drawDialog(); if(D.onClose) D.onClose(); if(lastFocus&&document.contains(lastFocus)) lastFocus.focus(); }
 function drawDialog(focus){ const L=$('#layer'); L.querySelector('.dlg')?.remove(); const D=S.dialog; if(!D) return; let html='';
-  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,S.doc?(selInfo()||{n:S.doc.root}).n:null,S.doc&&S.doc.root); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); } else if(D.type==='emoji'){ const n=S.doc&&find(S.doc.root,D.nodeId); html=V.emojiDialog(D,n&&n.n.icon,(prefs.get().recentIcons||[]).slice(0,12)); }
+  if(D.type==='settings') html=V.settingsDialog(S,D); else if(D.type==='ai') html=V.aiDialog(S,D,S.doc?(selInfo()||{n:S.doc.root}).n:null,S.doc&&S.doc.root); else if(D.type==='conflict') html=V.conflictDialog(D); else if(D.type==='shortcuts') html=V.shortcutsDialog(); else if(D.type==='prompt') html=V.promptDialog(D); else if(D.type==='share') html=V.shareDialog(D); else if(D.type==='md'){ const m=mdModel(D); html=V.mdDialog(D,m.tree,m.count); } else if(D.type==='emoji'){ const n=S.doc&&find(S.doc.root,D.nodeId); html=V.emojiDialog(D,n&&n.n.icon,(prefs.get().recentIcons||[]).slice(0,12)); }
   const w=document.createElement('div'); w.className='dlg'; w.innerHTML=html; L.appendChild(w);
   if(focus){ const f=w.querySelector(D.focus||'input,textarea,[role=tab][aria-selected=true],.modal button:not(.close)'); (f||w.querySelector('button'))?.focus(); } }
 function trapFocus(e){ const m=$('#layer .dlg .modal'); if(!m) return; const f=[...m.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.offsetParent!==null); if(!f.length) return; const a=f[0],z=f[f.length-1];
@@ -387,6 +388,48 @@ function openSettings(tab='data',extra={}){ const p=prefs.get(); const D={type:'
   Promise.all([storage.persisted(),storage.estimate()]).then(([per,est])=>{ D.persisted=per; D.usage=est&&est.usage; if(S.dialog===D) drawDialog(); }); }
 function askText(title,label,value,ok){ return new Promise(res=>openDialog({type:'prompt',title,label,input:value,ok:'確定',focus:'#pr-in',resolve:res,onClose:()=>res(null)})); }
 function confirmBox(title,sub,ok,danger){ return new Promise(res=>openDialog({type:'prompt',title,sub,ok,danger,resolve:res,onClose:()=>res(null)})); }
+// ---------- read-only share links (v1.8, see share.js) ----------
+// Snapshot links: the map as it is now, encrypted, in one Google Sheet in the owner's Drive ("anyone with the link can view").
+// Update rewrites the same Sheet (same link); stop deletes it. meta.share = {fid,key,at} caches the state on this browser,
+// Drive's appProperties carry it to other devices. Inline links (#z=) need no Google but cannot be stopped.
+const SHARE_BASE=()=>location.href.split('#')[0].split('?')[0].replace(/[^/]*$/,'');
+const INLINE_MAX=60000; // characters of map data in an inline link; longer URLs get cut by chat apps
+const shareUrl=st=>SH.driveLink(SHARE_BASE(),st.fid,st.key);
+const shareStale=st=>!!(st&&S.doc&&S.doc.updated&&new Date(S.doc.updated)>new Date(st.at));
+const shD=()=>S.dialog&&S.dialog.type==='share'?S.dialog:null;
+function shSet(D,st){ D.st=st; D.url=st?shareUrl(st):''; D.stale=shareStale(st); D.confirmStop=false; maps.setMeta(D.mapId,{share:st||null}); if(S.mapId===D.mapId) drawChrome(); }
+function shDraw(D,focus){ if(S.dialog!==D) return; drawDialog(); if(focus) $(`#layer ${focus}`)?.focus(); }
+function openShare(){ if(!S.doc) return; closeMenu(); const m=maps.meta(S.mapId)||{}, st=m.share||null;
+  const D={type:'share',mapId:S.mapId,title:S.doc.root.t,icon:S.doc.icon,st,url:st?shareUrl(st):'',stale:shareStale(st),google:GD.hasToken(),canSend:typeof navigator.share==='function',busy:'',err:'',focus:st?'[data-act="shareCopy"].primary':'[data-act="shareCreate"]'};
+  openDialog(D); GD.loadGis().catch(()=>{}); // ready before the click that opens Google's window
+  SH.seal(SH.snapshot(S.doc)).then(z=>{ D.inlineData=z; D.inlineOk=z.length<=INLINE_MAX; if(!D.st&&!D.inline&&!D.busy) shDraw(D,'[data-act="shareCreate"]'); }).catch(()=>{});
+  if(GD.hasToken()) dc().findShare(D.mapId).then(f=>{ const cur=D.st; if(D.busy) return; if((f&&(!cur||cur.fid!==f.fid||cur.at!==f.at))||(!f&&cur)){ shSet(D,f); shDraw(D); } }).catch(()=>{}); }
+async function shareClient(){ if(!GD.hasToken()){ await GD.signIn({hint:prefs.get().driveEmail||''}); driveC=null; syncInfo(); } return dc(); }
+async function shareSeal(key,at){ return SH.toCsv(await SH.seal(SH.snapshot(S.doc,at),key)); }
+async function copyLink(url,msg){ try{ await navigator.clipboard.writeText(url); toast(msg||'已複製連結'); return true; }
+  catch{ const i=$('#sh-url'); if(i){ i.focus(); i.select(); } toast('沒辦法自動複製：連結已選取，請長按（或 Ctrl+C）複製'); return false; } }
+const shareErr=e=>e&&e.status===-1&&/關閉/.test(e.message)?'':e&&e.message?e.message:'發生錯誤，請再試一次';
+async function shareAct(a,v,el){ const D=shD(); if(!D) return; if(D.busy&&!['shareSelect','shareCopy','shareSend'].includes(a)) return;
+  const run=async(kind,fn,focus)=>{ D.busy=kind; D.err=''; shDraw(D); try{ await fn(); }catch(e){ D.err=shareErr(e); } D.busy=''; D.checking=false; D.google=GD.hasToken(); shDraw(D,D.err?null:focus); };
+  switch(a){
+  case 'shareCreate': await run('create',async()=>{ const c=await shareClient(); if(S.mapId!==D.mapId) throw new Error('請回到這張圖再試一次');
+      D.checking=true; shDraw(D); let st=await c.findShare(D.mapId); D.checking=false; shDraw(D); const at=new Date().toISOString();
+      if(st){ await c.updateShare(st.fid,await shareSeal(st.key,at),at); st={...st,at}; } // shared before (e.g. on another device): same link, fresh content
+      else { const key=SH.newKey(); st=await c.createShare(D.mapId,S.doc.root.t,await shareSeal(key,at),key,at); }
+      shSet(D,st); await copyLink(D.url,'已建立並複製連結：知道連結的人都能查看'); },'[data-act="shareCopy"].primary'); break;
+  case 'shareUpdate': await run('update',async()=>{ const c=await shareClient(), old=D.st, at=new Date().toISOString(), csv=await shareSeal(old.key,at);
+      try{ await c.updateShare(old.fid,csv,at); shSet(D,{...old,at}); toast('已更新：同一個連結現在顯示最新內容'); }
+      catch(e){ if(e.status===401||e.status===0||e.status===-1) throw e; // the old Sheet is gone or can't be rewritten: make a new one (the link changes)
+        const key=SH.newKey(), st=await c.createShare(D.mapId,S.doc.root.t,await shareSeal(key,at),key,at); await c.deleteShare(old.fid).catch(()=>{}); shSet(D,st);
+        await copyLink(D.url,'連結已換新並複製：請把新連結傳給對方（舊連結已失效）'); } },'[data-act="shareCopy"].primary'); break;
+  case 'shareStop': if(v!=='yes'){ D.confirmStop=true; shDraw(D,'[data-act="shareStopNo"]'); break; }
+    await run('stop',async()=>{ const c=await shareClient(); await c.deleteShare(D.st.fid); shSet(D,null); toast('已停止分享：這個連結已失效'); },'[data-act="shareCreate"]'); break;
+  case 'shareStopNo': D.confirmStop=false; shDraw(D,'[data-act="shareStop"]'); break;
+  case 'shareCopy': { const i=$('#sh-url'); if(i) copyLink(i.value,'已複製連結：知道連結的人都能查看'); break; }
+  case 'shareSelect': el&&el.select&&el.select(); break;
+  case 'shareSend': { const url=($('#sh-url')||{}).value; if(!url) break; try{ await navigator.share({title:D.title,text:`${D.title}（MyMind 唯讀心智圖）`,url}); }catch(e){ if(e&&e.name!=='AbortError') copyLink(url); } break; }
+  case 'shareInline': await run('inline',async()=>{ const z=D.inlineData||await SH.seal(SH.snapshot(S.doc)); if(z.length>INLINE_MAX) throw new Error('這張圖太大，網址放不下：請用「建立分享連結」'); D.inline=SH.inlineLink(SHARE_BASE(),z); D.inlineAt=new Date().toISOString(); },'[data-act="shareCopy"].primary'); break;
+  case 'shareInlineBack': D.inline=null; shDraw(D,'[data-act="shareCreate"]'); break; } }
 // ---------- AI ----------
 const AI_TABS=['topic','notes','expand','summary','regroup'];
 function openAI(tab='topic',extra={}){ openDialog({type:'ai',tab,topic:'',notes:'',hint:'',depth:3,breadth:'4–6',into:'new',sumTo:'note',...extra}); }
@@ -467,7 +510,7 @@ async function driveSignIn({consent=false}={}){ const p=prefs.get(); await GD.si
 async function driveReauth(){ try{ await driveSignIn(); setSync('dirty'); await syncNow({reason:'manual'}); }catch(e){ if(e.status!==-1||!/關閉/.test(e.message)) toast(e.message); } }
 const pathOf=id=>`maps/${id}.json`;
 const AUTO_MS=()=>+prefs.get().autoMs||3*60*1000;
-function syncInfo(){ S.prefs=prefs.get(); S.backend=S.prefs.backend||'github'; S.backendName=BN(); S.driveEmail=S.prefs.driveEmail||''; S.driveAuth=isDrive()&&remote()&&!GD.hasToken(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); }
+function syncInfo(){ S.prefs=prefs.get(); S.backend=S.prefs.backend||'github'; S.backendName=BN(); S.driveEmail=S.prefs.driveEmail||''; S.driveAuth=isDrive()&&remote()&&!GD.hasToken(); S.mapCount=maps.index().filter(m=>!m.trashed).length; S.syncMode=S.prefs.sync; S.remote=remote(); S.unsynced=maps.dirtyCount(); S.autoMs=AUTO_MS(); S.shared=!!(S.mapId&&(maps.meta(S.mapId)||{}).share); }
 let autoT=null, persistAsked=false;
 // the phone's slide-out menu is a copy of the sidebar: keep its list and sync count current (e.g. after a restore started from it)
 function refreshDrawer(){ const nd=$('.navdrawer .side'); if(nd&&!nd.contains(document.activeElement)) nd.innerHTML=V.sidebar(S,maps.index()); }
@@ -750,6 +793,8 @@ async function act(a,v,el){ const f=selInfo();
   case 'cfPick': S.dialog.pick=v; drawDialog(); $(`[data-act="cfPick"][data-v="${v}"]`)?.focus(); break;
   case 'cfApply': applyConflict(); break;
   case 'preview': preview(v); break; case 'endPreview': endPreview(); break; case 'restoreVersion': restorePreview(); break;
+  case 'share': openShare(); break;
+  case 'shareCreate': case 'shareUpdate': case 'shareStop': case 'shareStopNo': case 'shareCopy': case 'shareSelect': case 'shareSend': case 'shareInline': case 'shareInlineBack': await shareAct(a,v,el); break;
   case 'promptOk': { const D=S.dialog; const val=D.input!==undefined?$('#pr-in').value:true; D.onClose=null; S.dialog=null; drawDialog(); D.resolve(val); break; }
   case 'cardMenu': openCardMenu(v,el); break;
   case 'openMap': closeMenu(); location.hash='#/map/'+v; break;
