@@ -1,6 +1,6 @@
 // Layout + SVG rendering for the right-expanding logic chart (DESIGN §7). Pure functions: data in, SVG string out.
 import { readable, cr, lum, mix, tint, esc, PRI, P } from './core.js';
-import { clLayout, clNodeSvg, clEdges } from './classic.js';
+import { clLayout, clNodeSvg, clEdges, clExpander } from './classic.js';
 const mctx=document.createElement('canvas').getContext('2d');
 export const FF='"Noto Sans TC","Noto Sans CJK TC","PingFang TC","Microsoft JhengHei",sans-serif';
 const twc=new Map();
@@ -92,7 +92,7 @@ export function renderMap(root,th,opt={}){
   // minimum visual line width: never thinner than 1.5 CSS px on screen, whatever the zoom (review r4 dev-suggestion 3)
   const minW=opt.sc?1.5/opt.sc:0;
   const ORGM=root.layout==='org';
-  if(root.cl) edges=clEdges(nodes,th); else
+  if(root.cl) edges=clEdges(nodes,th,root); else
   nodes.forEach(n=>[...kids(n)].sort((a,b)=>Math.abs(b.y-n.y)-Math.abs(a.y-n.y)).forEach(c=>{
     const col=colorOf(c,th); let p='';
     const s=c.side===-1?-1:1, plainOff=(m)=>th.deep==='plain'&&m.d>=2?(m.padX-5):0;
@@ -113,7 +113,7 @@ export function renderMap(root,th,opt={}){
   }));
   const R=relsSvg(root,th,opt,{CV,G,SEL,minW}); defs+=R.defs; edges+=R.lines;
   nodes.forEach(n=>{
-    if(root.cl){ const C=clNodeSvg(n,th); body+=overlays(n,C.g,C.rx,root,th,opt,{CV,SEL,SELK,nodeBg,col:th.line}); return; }
+    if(root.cl){ const C=clNodeSvg(n,th,root); body+=overlays(n,C.g,C.rx,root,th,opt,{CV,SEL,SELK,nodeBg,col:th.line}); return; }
     const col0=colorOf(n,th), col=n.d===0?th.root:brC(n), x=n.x-n.w/2, y=n.y-n.h/2, d=n.d; let g='';
     let fill='none',stroke='none',txt=th.text,sw=0,rx=8,fw=d===0?700:d===1?600:400, bgc=CV;
     if(d===0){fill=th.root;txt=th.rootText;rx=th.rootPill?n.h/2:14;bgc=fill;}
@@ -166,14 +166,15 @@ export function renderMap(root,th,opt={}){
 }
 // selection / find / drop / collapse overlays for the classic engine (same look as the default renderer)
 function overlays(n,g,rx,root,th,opt,{CV,SEL,SELK,nodeBg,col}){ const x=n.x-n.w/2, y=n.y-n.h/2, d=n.d;
-  if(n.collapsed&&n.c&&n.c.length){ const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
+  if(n.collapsed&&n.c&&n.c.length&&root.spec&&root.gs) g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點">${clExpander(n,countDesc(n),root.spec.bg)}</g>`;
+  else if(n.collapsed&&n.c&&n.c.length){ const ccx=n.x+n.w/2+14, ccy=n.y, cfg=readable(col,nodeBg,4.5);
     g+=`<g class="cc" role="button" aria-label="展開 ${countDesc(n)} 個隱藏節點"><circle data-g="collapse" data-gbg="${CV}" cx="${ccx}" cy="${ccy}" r="10" fill="${nodeBg}" stroke="${readable(col,CV,3)}" stroke-width="1.6"/><text x="${ccx}" y="${ccy+4}" font-size="11.5" font-weight="700" fill="${cfg}" data-bg="${nodeBg}" text-anchor="middle">${countDesc(n)}</text></g>`;}
   if(opt.drop===n.id) g=`<rect x="${x-6}" y="${y-6}" width="${n.w+12}" height="${n.h+12}" rx="${rx+5}" fill="none" stroke="${SEL}" stroke-width="2" stroke-dasharray="5 4"/>`+g;
   if(opt.hits&&opt.hits.has(n.id)&&!opt.thumb){ const cur=opt.cur===n.id, HIT=readable(lum(CV)>.35?'#C2410C':'#FFB347',CV,3);
     g=`<rect class="findhit${cur?' cur':''}" x="${x-9}" y="${y-9}" width="${n.w+18}" height="${n.h+18}" rx="${rx+8}" fill="${cur?'#FFB34733':'#FFD54A26'}" data-g="hit" data-gbg="${CV}" stroke="${HIT}" stroke-width="${cur?3:1.6}"${cur?'':' stroke-dasharray="5 4"'}/>`+g; }
   if(opt.sel===n.id&&!opt.thumb){
     g=`<rect x="${x-5}" y="${y-5}" width="${n.w+10}" height="${n.h+10}" rx="${rx+4}" fill="${SEL}10" data-g="select" data-gbg="${CV}" stroke="${SEL}" stroke-width="2"/>`+g;
-    const hx=n.x+(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
+    const hx=n.x+(n.side===-1?-1:1)*(n.w/2+(n.collapsed&&n.c&&n.c.length?44:22)), hy=n.y, hr=opt.sc?Math.max(18,(opt.mobile?22:16)/opt.sc):18;
     g+=`<g class="handle" role="button" aria-label="新增子主題"><circle cx="${hx}" cy="${hy}" r="${hr}" fill="transparent"/><circle data-g="handle" data-gbg="${CV}" cx="${hx}" cy="${hy}" r="11" fill="${SEL}"/><path data-g="icon" data-gbg="${SEL}" d="M${hx-4.5},${hy}h9M${hx},${hy-4.5}v9" stroke="${SELK}" stroke-width="2" stroke-linecap="round"/></g>`;}
   return `<g class="node" data-id="${n.id}" role="treeitem" aria-level="${d+1}" aria-label="${esc(n.t)}"${n.c&&n.c.length?` aria-expanded="${!n.collapsed}"`:''}${opt.sel===n.id?' aria-selected="true"':''}>${g}</g>`; }
 export function thumbSvg(data,th,pad=30,st={}){const r=layout(JSON.parse(JSON.stringify(data)),th,st);const {svg,b}=renderMap(r,th,{thumb:true});return `<svg viewBox="${b.x0-pad} ${b.y0-pad*.75} ${b.w+pad*2} ${b.h+pad*1.5}" aria-hidden="true">${svg}</svg>`;}
@@ -207,7 +208,13 @@ function relsSvg(root,th,opt,{CV,G,SEL,minW}){ const list=relEnds(root); if(!lis
   const col=G(relAccent(th)), key=col.slice(1), selC=SEL; let lines='',labels='';
   const defs=`<marker id="rela-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${col}"/></marker><marker id="relas-${key}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0.8 L10,5 L0,9.2 z" fill="${selC}"/></marker>`;
   const hitW=Math.max(12,(opt.mobile?30:16)/(opt.sc||1));
-  const vis=all(root); list.forEach(({r,A,B,hidden})=>{ const g=relGeom(A,B,vis), sel=opt.selRel===r.id&&!opt.thumb, c=sel?selC:col, w=Math.max(sel?2.6:1.8,minW);
+  const vis=all(root); list.forEach(({r,A,B,hidden})=>{
+    if(r.gm&&root.gs&&!hidden){ // faithful import: the source app's dashed cubic, end/control points kept relative to the two node centres
+      const m=r.gm, r3=v=>String(Math.round(v*1000)/1000), P=(n,q)=>r3(n.x+q[0])+' '+r3(n.y+q[1]), d=`M${P(A,m.p0)} C${P(A,m.c1)} ${P(B,m.c2)} ${P(B,m.p3)}`, gc=m.color||col, sel=opt.selRel===r.id&&!opt.thumb, mid=`gmra-${r.id.replace(/[^\w-]/g,'')}`;
+      const mk=`<marker id="${mid}" refX="0" refY="0" orient="auto-start-reverse" viewBox="-4 -4 8 8" markerWidth="6" markerHeight="6"><path d="M-2.5 -3 L3 0 L-2.5 3Z" fill="${sel?selC:gc}"/></marker>`;
+      lines+=`<g class="rel${sel?' sel':''}" data-rel="${esc(r.id)}" role="button" aria-label="${esc(`關聯線：${A.t||''} → ${B.t||''}`)}"><defs>${mk}</defs>${opt.thumb?'':`<path class="relhit" d="${d}" fill="none" stroke="transparent" stroke-width="${hitW.toFixed(1)}"/>`}<path data-g="rel" d="${d}" fill="none" stroke="${sel?selC:gc}" stroke-width="${m.w||2}" stroke-dasharray="${esc(m.dash||'8 2')}"${m.ms?` marker-start="url(#${mid})"`:''}${m.me!==false?` marker-end="url(#${mid})"`:''}/></g>`;
+      return; }
+    const g=relGeom(A,B,vis), sel=opt.selRel===r.id&&!opt.thumb, c=sel?selC:col, w=Math.max(sel?2.6:1.8,minW);
     const lbl=String(r.label||'').trim(), name=`關聯線：${A.t||''} → ${B.t||''}${lbl?'（'+lbl+'）':''}${hidden?'，端點在收合的分支裡':''}`;
     lines+=`<g class="rel${sel?' sel':''}" data-rel="${esc(r.id)}" role="button" aria-label="${esc(name)}"${hidden?' opacity=".6"':''}>${opt.thumb?'':`<path class="relhit" d="${g.d}" fill="none" stroke="transparent" stroke-width="${hitW.toFixed(1)}"/>`}${sel?`<path d="${g.d}" fill="none" stroke="${selC}" stroke-opacity=".18" stroke-width="${(w+6).toFixed(1)}" stroke-linecap="round"/>`:''}<path data-g="rel" data-gbg="${CV}" d="${g.d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}" stroke-dasharray="7 5" stroke-linecap="round" marker-end="url(#${sel?'relas':'rela'}-${key})"/></g>`;
     if(lbl){ const maxW=opt.mobile?150:200; let t=lbl; if(tw(t,RELF)>maxW){ while(t.length>1&&tw(t+'…',RELF)>maxW) t=t.slice(0,-1); t+='…'; } const tw0=tw(t,RELF), W=tw0+18, H=24, x=g.mid[0]-W/2, y=g.mid[1]-H/2, tc=readable(th.text,CV,4.5);

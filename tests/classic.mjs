@@ -21,7 +21,7 @@ const b=await chromium.launch({executablePath:exe});
   const r=await p.evaluate(d=>{ const o=window.renderDoc(d,160,400,1); const svg=document.getElementById('vp').innerHTML; return {...o,svg}; },doc);
   const by=Object.fromEntries(r.nodes.map(n=>[n.t,n])), L=n=>n.x-n.w/2, R=n=>n.x+n.w/2, T=n=>n.y-n.h/2, B=n=>n.y+n.h/2, near=(a,b,e=.02)=>Math.abs(a-b)<=e;
   ok('root is an arc-sided pill: height = 2 lines × 31.1875 + 32',near(by['中心主題\n第二行'].h,94.375),by['中心主題\n第二行'].h);
-  ok('level-1 box: one line 16px → 39.1875 tall; 1-char text uses the 17px minimum + 2×15 padding',near(by['甲'].h,39.1875)&&near(by['甲'].w,47),by['甲'].w+'×'+by['甲'].h);
+  ok('level-1 box: one line 16px → 39.1875 tall; 1-char text uses the round(16×1.2)=19px minimum + 2×15 padding',near(by['甲'].h,39.1875)&&near(by['甲'].w,49),by['甲'].w+'×'+by['甲'].h);
   ok('deeper node: 14px → 29 tall (17px minimum content), single-character node 35 wide',near(by['一'].h,29)&&near(by['一'].w,35),by['一'].w+'×'+by['一'].h);
   ok('three explicit lines all kept (no 2-line cap): 3 × 16.797 + 12',near(by['多行\n第二行\n第三行'].h,62.39,.01),by['多行\n第二行\n第三行'].h);
   ok('icon node: 21px sticker + 6px gap, 33 tall',near(by['圖示'].h,33)&&near(by['圖示'].w,28+18+27,0.3),by['圖示'].w+'×'+by['圖示'].h);

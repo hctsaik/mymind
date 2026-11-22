@@ -18,7 +18,10 @@ window.__mm=S; // for tests/debugging (contains no secrets)
 const ensureIds=n=>{if(!n.id)n.id=newId();(n.c||[]).forEach(ensureIds);return n;};
 const clone=o=>JSON.parse(JSON.stringify(o));
 function find(root,id,par=null,idx=0){ if(root.id===id) return {n:root,parent:par,idx}; for(let i=0;i<(root.c||[]).length;i++){const r=find(root.c[i],id,root,i); if(r) return r;} return null; }
-const th=()=>THEMES[(S.doc&&S.doc.theme)||DEFAULT_THEME]||THEMES[DEFAULT_THEME];
+const thBase=()=>THEMES[(S.doc&&S.doc.theme)||DEFAULT_THEME]||THEMES[DEFAULT_THEME];
+// faithful imports (classic engine) carry their own canvas colour in root.gs.bg; every other map/theme is unchanged
+const thGs=new WeakMap(); const th=()=>{ const T=thBase(), g=S.doc&&S.doc.root&&S.doc.root.gs; if(!g||!g.bg||T.engine!=='classic') return T; let c=thGs.get(g); if(!c||c.T!==T){ c={T,v:{...T,canvas:g.bg}}; thGs.set(g,c); } return c.v; };
+const cvBgImg=()=>{ const g=S.doc&&S.doc.root&&S.doc.root.gs; return g&&g.bgImg&&thBase().engine==='classic'?`url("${g.bgImg}")`:''; };
 const isM=V.isMobile;
 let toastT;
 function toast(msg,act){ let t=$('#toast'); if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t);}
@@ -79,7 +82,7 @@ function render(){ applyUi(); syncInfo(); const side=$('#side'), main=$('#main')
 const curName=()=>{const f=selInfo();return (f?f.n:S.doc.root).t;};
 function drawChrome(){ syncInfo(); if(S.view!=='editor'){ const side=$('#side'); if(side&&S.view==='list'&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); return; } $$('.syncbtn').forEach(b=>b.outerHTML=V.syncBtn(S,b.dataset.k)); const t=$('#maptitle'); if(t) t.textContent=(S.doc.icon||'🧠')+' '+S.doc.root.t; const sv=$('.top .saved'); if(sv) sv.outerHTML=V.savedChip(S); const mb=$('.top .rb.more'); if(mb&&!mb.matches('[aria-expanded=true]')) mb.outerHTML=V.moreBtn(S); $$('.mstat').forEach(x=>x.remove()); $('.top.flt')?.insertAdjacentHTML('afterend',V.mobileStatus(S));
   const bp=$('.backpill'); if(bp){bp.querySelector('.cn').textContent=curName(); bp.setAttribute('aria-label','回到列表（目前節點：'+curName()+'）');}
-  $('#cv').style.setProperty('--cv',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas);
+  $('#cv').style.setProperty('--cv',th().canvas); $('#cv').style.setProperty('--cvdot',th().canvas); $('#main').style.setProperty('--cv-main',th().canvas); { const cv=$('#cv'), bi=cvBgImg(); if(cv.dataset.bgi!==bi){ cv.dataset.bgi=bi; cv.style.backgroundImage=bi; cv.style.backgroundSize=bi?'100% 100%':''; cv.style.backgroundPosition=bi?'left bottom':''; cv.style.backgroundRepeat=bi?'no-repeat':''; } }
   const side=$('#side'); if(side&&!side.contains(document.activeElement)) side.innerHTML=V.sidebar(S,maps.index()); }
 function drawPanel(){ const h=$('#panelHost'); if(!h) return; const f=selInfo();
   const key=S.panel+'|'+S.sel+'|'+(S.panelRev||0);
@@ -295,7 +298,7 @@ function canvasKey(e){ if(S.editing||S.view!=='editor') return; const k=e.key, c
   else if(k==='Escape'){ e.preventDefault(); if(S.preview) return endPreview(); const b=$('.tb .tbtn'); (b&&b.offsetParent?b:$('.right-actions button:not([hidden])'))?.focus(); }
   else if(k==='?'){ e.preventDefault(); openDialog({type:'shortcuts'}); }
   else if((e.keyCode===229||k==='Process'||e.isComposing)&&!c&&!e.altKey&&S.sel){ startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta) ta.value=''; } // IME (注音/拼音): open the editor and let the composition continue there — no preventDefault
-  else if(/^[\p{L}\p{N}]$/u.test(k)&&!c&&!e.altKey&&S.sel){ // typing starts editing (GitMind habit)
+  else if(/^[\p{L}\p{N}]$/u.test(k)&&!c&&!e.altKey&&S.sel){ // typing starts editing (common mind-map app habit)
     e.preventDefault(); startEdit(S.sel); const ta=$('#ovl .editbox'); if(ta){ta.value=k;ta.setSelectionRange(1,1);} } }
 document.addEventListener('keydown',e=>{ const t=e.target, typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'), c=e.ctrlKey||e.metaKey;
   if(e.key==='Escape'&&closeMenu(true)) { e.preventDefault(); return; }
